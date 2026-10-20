@@ -1,4 +1,4 @@
-# 消息配置可用；发布相关配置为草案。部署到 <git-common-dir>/rls/config.toml。
+# 消息与 branches 版本线规则可用；release 发布动作配置仍为草案。部署到 <git-common-dir>/rls/config.toml。
 # 将 templates/release-message.md.j2 一并复制到该配置目录的 templates/ 下。
 schema_version = 1
 

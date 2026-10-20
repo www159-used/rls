@@ -1,6 +1,6 @@
 ---
 name: rls
-description: Use the rls release CLI to generate or regenerate release messages from saved records, configure repository or global message templates, and troubleshoot message output. Use when the user asks to use rls for release notifications or configure its messages; not for Rust Language Server tasks.
+description: Use the rls release CLI to generate or regenerate release messages from Git tags and commits, configure repository or global message templates, and troubleshoot message output. Use when the user asks to use rls for release notifications or configure its messages; not for Rust Language Server tasks.
 license: AGPL-3.0-only
 ---
 
@@ -21,24 +21,27 @@ license: AGPL-3.0-only
 在用户指定的目标仓库执行命令，让仓库配置参与解析。
 
 ```bash
-# ID 是发布记录 ID，不是版本号或 tag
-rls message <release-id>
+# 显式区间，包含基线之后直到目标的全部提交
+rls message <目标tag> --from <基线tag>
 
-# 显式文件也可以在仓库外使用
-rls message --record <record.json>
+# 根据仓库版本线自动选择上一 tag
+rls message <目标tag>
 
-# 需要文件或剪贴板时
-rls message --record <record.json> --output <message.txt>
-rls message --record <record.json> --copy
+# 多个目标分别选基线，按参数顺序输出
+rls message <目标tag1> <目标tag2>
+
+# 缩写、文件和剪贴板
+rls msg <目标tag> -o <message.txt>
+rls m <目标tag> -c
 ```
 
-ID 对应当前 worktree 根目录的 `.rls/state/releases/<release-id>.json`。`--record` 与位置参数互斥；显式记录路径相对执行目录解析。仓库外使用全局或内置消息设置，不会根据记录文件的位置自动选择仓库。
+位置参数是已有 tag，不是版本号、分支或记录 ID。`--from` 只适用于单个目标。没有 records、JSON 输入或 `--record` 参数，不要要求用户准备这些文件。
 
-先找到真实记录；没有记录时说明所需输入，不能把示例数据当作实际发布，也不能凭一个 tag 推断发布成功。需要构造或检查输入时阅读 [记录格式与配置语义](references/formats.md)。
+自动选择需要仓库 branches 规则，详见 [版本线和模板格式](references/formats.md)。只选择目标祖先中的同版本线 tag，按数字而非字符串排序；没有基线、历史不单调或歧义时显式指定 --from。浅克隆需要补全历史或显式选择可验证的基线。基线必须是目标祖先，同一提交报告无新变更。
 
-只把 stdout 作为生成的消息；失败和跳过项在 stderr 单独报告。只向模板传入成功发布项。查看退出码：模板、文件输出或剪贴板失败均不得报告为全部成功；输出失败可独立重试，不需要重新发布。
+命令只读取本地 Git，不自动 fetch。如果 tag 不在本地，说明缺失的 tag，并按用户任务范围获取需要的引用。轻量和带注释 tag 均支持。本地 tag 存在不能证明远端发布成功，不能据此宣布发布完成。
 
-修改称呼、模板或空行后，对同一记录重新运行 `message`。配置变量只位于 `variables`，不改变记录中的版本、SHA、提交列表或发布状态。输出文件不能覆盖输入记录。
+消息由 Git 的 SHA、tag 和完整提交区间生成。修改称呼、模板或空行后直接重跑相同命令；配置变量只进入 `variables`，不改变 Git 数据。检查退出码和 stderr，模板、文件或剪贴板失败不能报告为成功；可独立重试输出，无需发布操作。
 
 ## 定位并编辑配置
 
@@ -60,4 +63,4 @@ git rev-parse --path-format=absolute --git-common-dir
 - 相对模板路径以**声明该模板的配置文件目录**为基准；继承全局模板时仍使用全局目录。
 - 变量未定义、模板缺失或语法错误均失败。模板没有 shell、环境变量访问或任意文件加载功能。
 
-改完后用用户选定的记录实际渲染，检查称呼、成功项、提交顺序和空行。交付生成文本或输出文件路径，并简述失败/跳过项；消息生成本身不代表通知已经发出。
+改完后用用户选定的 tag 区间实际渲染，检查称呼、版本、完整提交顺序和空行。交付生成文本或输出文件路径；消息生成本身不代表通知已经发出。

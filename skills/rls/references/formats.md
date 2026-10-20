@@ -1,4 +1,4 @@
-# 配置与发布记录
+# 版本线与模板格式
 
 ## 配置 v1
 
@@ -31,34 +31,34 @@ changelog:
 {% endif %}{% endfor %}
 ```
 
-模板使用 MiniJinja。可访问 `release_id`、`variables`、`releases`；循环和条件可用，未定义变量严格报错，保留模板尾部换行。模板可以读取每条发布的 branch、version、tag、sha、status、commits。
+模板使用 MiniJinja。可访问 `variables`、`releases`；循环和条件可用，未定义变量严格报错，保留模板尾部换行。模板可以读取每条发布的 branch、version、tag、previous_tag、sha、previous_sha、commits。
 
-## 发布记录 schema v1
+## 仓库版本线规则
 
-以下仅为结构示例，不能作为真实发布凭据。以实际保存的记录为准。
+```toml
+[branches."5.6"]
+version_prefix = "5.6.0"
+tag_prefix = "v"
 
-```json
-{
-  "schema_version": 1,
-  "release_id": "example-release",
-  "releases": [
-    {
-      "status": "success",
-      "branch": "main",
-      "version": "1.0.1",
-      "tag": "v1.0.1",
-      "sha": "1111111111111111111111111111111111111111",
-      "commits": [
-        {
-          "sha": "1111111111111111111111111111111111111111",
-          "subject": "修复示例问题"
-        }
-      ]
-    }
-  ]
-}
+[branches."5.6-2sync"]
+version_prefix = "5.6.1"
+tag_prefix = "v"
 ```
 
-上述字段均需提供。`status` 必须为 `success`、`failed` 或 `skipped`；只有 success 进入模板。记录 ID 不可为空；按位置参数读取时 ID 仅支持 ASCII 字母、数字、连字符和下划线，文件内 release_id 必须与参数一致。
+这些规则只读取仓库配置，不从全局继承。第一条匹配 `v5.6.0.<非负整数>`。目标 tag 必须只匹配一条规则；找出其祖先中的同线 tag，按末位数字取最大值作为上一 tag。若历史版本顺序不一致、存在数字重复或分叉歧义，要求显式 --from；不会自动猜测或跳号。
 
-`releases` 和每项的 `commits` 按记录顺序传给模板，不重新访问发布后端。仓库配置跨 worktree 共享，但 `.rls/state/` 是当前 worktree 的本地状态；另一 worktree 的记录需显式指定 `--record`。
+`--from` 可以使用任意已有 tag，不要求匹配版本线，但必须为目标祖先。有配置规则时 version 去除 tag_prefix，branch 为匹配的配置键；无匹配规则时 version 保留完整目标 tag，branch 为空。所有 tag 均解析到提交 SHA 后再读取区间。
+
+## 模板数据
+
+每项 release 提供：
+
+| 字段 | 含义 |
+|---|---|
+| tag / previous_tag | 目标及基线 tag 名 |
+| sha / previous_sha | 解析后的提交 SHA |
+| version | 去掉匹配规则 tag_prefix 的版本，或无规则时的完整 tag |
+| branch | 匹配的仓库版本线配置键，无规则时为空 |
+| commits | 基线之后直到目标的全部提交，每条包含 sha、subject |
+
+`releases` 按命令参数顺序排列，commits 使用反向拓扑顺序，包含合并提交。不提供 release_id 或 status，也不保存 records。输入的 tag 必须在当前仓库内；linked worktree 共用 Git 引用和配置。

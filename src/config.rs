@@ -22,10 +22,19 @@ struct ConfigFile {
     schema_version: u32,
     #[serde(default)]
     message: MessageConfig,
+    #[serde(default)]
+    branches: BTreeMap<String, BranchRule>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BranchRule {
+    pub version_prefix: String,
+    pub tag_prefix: String,
 }
 
 #[derive(Debug, Default)]
 pub struct ResolvedMessageConfig {
+    pub branches: BTreeMap<String, BranchRule>,
     pub template: Option<PathBuf>,
     pub variables: BTreeMap<String, toml::Value>,
 }
@@ -59,15 +68,15 @@ pub fn git_path(cwd: &Path, option: &str) -> Result<Option<PathBuf>> {
 pub fn load(cwd: &Path, global: Option<&Path>) -> Result<ResolvedMessageConfig> {
     let mut result = ResolvedMessageConfig::default();
     if let Some(directory) = global {
-        overlay(&mut result, &directory.join("config.toml"))?;
+        overlay(&mut result, &directory.join("config.toml"), false)?;
     }
     if let Some(directory) = git_path(cwd, "--git-common-dir")? {
-        overlay(&mut result, &directory.join("rls/config.toml"))?;
+        overlay(&mut result, &directory.join("rls/config.toml"), true)?;
     }
     Ok(result)
 }
 
-fn overlay(result: &mut ResolvedMessageConfig, path: &Path) -> Result<()> {
+fn overlay(result: &mut ResolvedMessageConfig, path: &Path, repository: bool) -> Result<()> {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -97,5 +106,20 @@ fn overlay(result: &mut ResolvedMessageConfig, path: &Path) -> Result<()> {
         result.template = Some(path.parent().expect("config parent").join(template));
     }
     result.variables.extend(config.message.variables);
+    if repository {
+        for (name, rule) in &config.branches {
+            if rule
+                .version_prefix
+                .split('.')
+                .any(|part| part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()))
+            {
+                bail!(
+                    "配置 {} 的分支 {name} version_prefix 必须为点分数字",
+                    path.display()
+                );
+            }
+        }
+        result.branches = config.branches;
+    }
     Ok(())
 }

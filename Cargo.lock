@@ -1070,9 +1070,7 @@ dependencies = [
  "directories",
  "futures",
  "minijinja",
- "same-file",
  "serde",
- "serde_json",
  "tempfile",
  "toml",
 ]
