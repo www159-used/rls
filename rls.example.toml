@@ -1,0 +1,24 @@
+# 配置草案：尚未实现解析器。复制为 rls.toml 后按项目调整。
+schema_version = 1
+
+[project]
+name = "example-service"
+
+[release]
+backend = "git-tag"
+remote = "origin"
+push = true
+
+[branches."5.6"]
+version_prefix = "5.6.0"
+tag_prefix = "v"
+
+[branches."5.6-2sync"]
+version_prefix = "5.6.1"
+tag_prefix = "v"
+
+[message]
+template = "templates/release-message.md.j2"
+
+[message.variables]
+greeting = "请协助构建以下补丁包，谢谢。"
