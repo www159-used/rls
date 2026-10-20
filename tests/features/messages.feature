@@ -1,363 +1,323 @@
-# language: zh-CN
-功能: 从 Git tags 按分层配置生成发布消息
-  背景:
-    假如隔离的仓库、全局目录和 Git tags
+# language: en
+Feature: Release messages and multi-branch tags
+  Background:
+    Given an isolated repository, global directory and Git tags
 
-  场景: 无配置使用内置模板
-    当生成消息
-    那么消息包含区间内全部提交且保持顺序和换行
-    并且工作区和 Git 引用保持不变且未生成 records
+  Scenario: Default message template
+    When generating the message
+    Then the message contains all commits in order with preserved newlines
+    And the worktree and Git refs are unchanged and no records are created
 
-  场景: 仓库外明确报错
-    假如从仓库外执行
-    当生成消息
-    那么错误包含 "请在目标 Git 仓库"
+  Scenario: Reject commands outside a repository
+    Given running outside the repository
+    When generating the message
+    Then the error contains "target Git repository"
 
-  场景: 在子目录读取 Git 区间
-    假如从仓库子目录执行
-    当生成消息
-    那么消息包含区间内全部提交且保持顺序和换行
+  Scenario: Read Git history from subdirectories
+    Given running from a repository subdirectory
+    When generating the message
+    Then the message contains all commits in order with preserved newlines
 
-  场景: 输出文件保留换行
-    当将消息写入文件
-    那么工作区和 Git 引用保持不变且未生成 records
+  Scenario: File output preserves newlines
+    When writing the message to a file
+    Then the worktree and Git refs are unchanged and no records are created
 
-  场景: 全局模板与变量被仓库继承
-    假如全局配置为
+  Scenario: Inherit and override global templates and variables
+    Given the global configuration is
       """
       schema_version = 1
       [message]
       template = "templates/message.j2"
       [message.variables]
-      greeting = "全局称呼"
-      suffix = "谢谢"
+      greeting = "Global greeting"
+      suffix = "Thanks"
       """
-    并且全局模板为
+    And the global template is
       """
       {{ variables.greeting }}|{{ variables.suffix }}|{{ releases[0].tag }}
       """
-    当生成消息
-    那么消息包含 "全局称呼|谢谢|v1.0.1"
-    假如仓库配置为
+    When generating the message
+    Then the message contains "Global greeting|Thanks|v1.0.1"
+    Given the repository configuration is
       """
       schema_version = 1
       [message.variables]
-      greeting = "仓库称呼"
-      releases = "不能覆盖事实"
+      greeting = "Repository greeting"
+      releases = "Cannot override facts"
       """
-    当生成消息
-    那么消息包含 "仓库称呼|谢谢|v1.0.1"
-    并且工作区和 Git 引用保持不变且未生成 records
-    假如仓库配置为
+    When generating the message
+    Then the message contains "Repository greeting|Thanks|v1.0.1"
+    And the worktree and Git refs are unchanged and no records are created
+    Given the repository configuration is
       """
       schema_version = 1
       [message.variables]
       greeting = ""
       """
-    当生成消息
-    那么消息包含 "|谢谢|v1.0.1"
+    When generating the message
+    Then the message contains "|Thanks|v1.0.1"
 
-  场景: linked worktree 读取共享元目录和仓库相对模板
-    假如全局配置为
+  Scenario: Shared configuration and relative templates in worktrees
+    Given the global configuration is
       """
       schema_version = 1
       [message.variables]
-      greeting = "继承变量"
+      greeting = "Inherited variable"
       """
-    并且仓库配置为
+    And the repository configuration is
       """
       schema_version = 1
       [message]
       template = "templates/message.j2"
       """
-    并且仓库模板为
+    And the repository template is
       """
-      仓库模板|{{ variables.greeting }}|{{ releases[0].tag }}
+      Repository template|{{ variables.greeting }}|{{ releases[0].tag }}
       """
-    并且从 linked worktree 执行
-    当生成消息
-    那么消息包含 "仓库模板|继承变量|v1.0.1"
+    And running from a linked worktree
+    When generating the message
+    Then the message contains "Repository template|Inherited variable|v1.0.1"
 
-  场景: 仓库模板覆盖全局模板
-    假如全局配置为
+  Scenario: Repository template overrides global template
+    Given the global configuration is
       """
       schema_version = 1
       [message]
       template = "templates/message.j2"
       """
-    并且全局模板为
+    And the global template is
       """
-      全局模板
+      Global template
       """
-    并且仓库配置为
+    And the repository configuration is
       """
       schema_version = 1
       [message]
       template = "templates/message.j2"
       """
-    并且仓库模板为
+    And the repository template is
       """
-      仓库模板
+      Repository template
       """
-    当生成消息
-    那么消息包含 "仓库模板"
+    When generating the message
+    Then the message contains "Repository template"
 
-  场景: 显式模板丢失时报错
-    假如仓库配置为
+  Scenario: Missing template reports an error
+    Given the repository configuration is
       """
       schema_version = 1
       [message]
       template = "missing.j2"
       """
-    当生成消息
-    那么错误包含 "missing.j2"
+    When generating the message
+    Then the error contains "missing.j2"
 
-  场景: 模板变量拼错时报错
-    假如仓库配置为
+  Scenario: Undefined template variables fail
+    Given the repository configuration is
       """
       schema_version = 1
       [message]
       template = "templates/message.j2"
       """
-    并且仓库模板为
+    And the repository template is
       """
       {{ variables.typo }}
       """
-    当生成消息
-    那么错误包含 "undefined"
+    When generating the message
+    Then the error contains "undefined"
 
-  场景: 模板语法错误时报错
-    假如仓库配置为
+  Scenario: Invalid template syntax fails
+    Given the repository configuration is
       """
       schema_version = 1
       [message]
       template = "templates/message.j2"
       """
-    并且仓库模板为
+    And the repository template is
       """
       {% broken %}
       """
-    当生成消息
-    那么错误包含 "解析消息模板"
+    When generating the message
+    Then the error contains "Parse message template"
 
-  场景大纲: 非法配置不能静默回退
-    假如仓库配置为
+  Scenario Outline: Invalid configuration cannot silently fall back
+    Given the repository configuration is
       """
       <config>
       """
-    当生成消息
-    那么错误包含 "<error>"
+    When generating the message
+    Then the error contains "<error>"
 
-    例子:
+    Examples:
       | config             | error          |
       | schema_version = 9 | schema_version |
-      | invalid = [        | 解析配置       |
+      | invalid = [        | Parse configuration       |
 
-  场景: 全局配置损坏也不能静默回退
-    假如全局配置为
+  Scenario: Invalid global configuration fails
+    Given the global configuration is
       """
       schema_version = 99
       """
-    当生成消息
-    那么错误包含 "schema_version 99"
+    When generating the message
+    Then the error contains "schema_version 99"
 
-  场景: 绝对模板路径保持不变
-    假如仓库模板使用绝对路径
-    当生成消息
-    那么消息包含 "绝对模板|v1.0.1"
+  Scenario: Absolute template paths are preserved
+    Given the repository template uses an absolute path
+    When generating the message
+    Then the message contains "Absolute template|v1.0.1"
 
-  场景: 显式消息版本与旧配置合并
-    假如全局配置为
+  Scenario: Merge explicit and legacy message versions
+    Given the global configuration is
       """
       schema_version = 1
       [message]
       version = 1
       template = "templates/message.j2"
       [message.variables]
-      greeting = "全局"
+      greeting = "global"
       """
-    并且全局模板为
+    And the global template is
       """
       {{ variables.greeting }}|{{ releases[0].tag }}
       """
-    并且仓库配置为
+    And the repository configuration is
       """
       schema_version = 1
       [message.variables]
-      greeting = "旧仓库配置"
+      greeting = "Legacy repository config"
       """
-    当生成消息
-    那么消息包含 "旧仓库配置|v1.0.1"
+    When generating the message
+    Then the message contains "Legacy repository config|v1.0.1"
 
-  场景大纲: 各层独立拒绝不支持的消息版本
-    假如全局配置为
+  Scenario Outline: Validate message versions independently in each layer
+    Given the global configuration is
       """
       schema_version = 1
       [message]
       version = <global_version>
       """
-    并且仓库配置为
+    And the repository configuration is
       """
       schema_version = 1
       [message]
       version = <project_version>
       """
-    当生成消息
-    那么错误包含 "不支持 message.version <invalid_version>"
+    When generating the message
+    Then the error contains "unsupported message.version <invalid_version>"
 
-    例子:
+    Examples:
       | global_version | project_version | invalid_version |
       | 2              | 1               | 2               |
       | 1              | 2               | 2               |
       | 1              | 0               | 0               |
 
-  场景: 消息版本必须为整数
-    假如仓库配置为
+  Scenario: Message version must be an integer
+    Given the repository configuration is
       """
       schema_version = 1
       [message]
       version = "1"
       """
-    当生成消息
-    那么错误包含 "解析配置"
+    When generating the message
+    Then the error contains "Parse configuration"
 
-  场景: 根据版本线按数字选择上一 tag 并排除无关 tag
-    假如仓库配置为
-      """
-      schema_version = 1
-      [branches.main]
-      version_prefix = "9.0"
-      tag_prefix = "v"
-      """
-    并且tag "v9.0.2" 指向 "HEAD~2"
-    并且tag "v9.0.9" 指向 "HEAD~1"
-    并且tag "v9.0.10" 指向 "HEAD"
-    并且tag "v2.0.99" 指向 "HEAD~1"
-    并且tag "2026-10-20" 指向 "HEAD~1"
-    并且存在不相关分支上的同版本线 tag
-    当执行消息命令 "message v9.0.10"
-    那么消息包含 "v9.0.10"
-    并且消息包含 "修复二"
-    并且消息不包含 "修复一"
+  Scenario: Aliases and default current branch
+    When running the CLI with "m"
+    Then the message contains all commits in order with preserved newlines
+    And the worktree and Git refs are unchanged and no records are created
 
-  场景: 自动基线与显式基线结果一致
-    假如仓库配置为
-      """
-      schema_version = 1
-      [branches.main]
-      version_prefix = "1.0"
-      tag_prefix = "v"
-      """
-    当执行消息命令 "msg v1.0.1"
-    那么消息包含区间内全部提交且保持顺序和换行
-    并且工作区和 Git 引用保持不变且未生成 records
+  Scenario: Reject tag and range arguments
+    When running the CLI with "msg v1.0.0..v1.0.1"
+    Then the error contains "Git check-ref-format"
 
-  场景: 没有规则时要求显式基线
-    当执行消息命令 "message v1.0.1"
-    那么错误包含 "请配置 branches 或使用 --from"
+  Scenario: Reject the old from option
+    When running the CLI with "msg main --from v1.0.0"
+    Then the error contains "--from"
 
-  场景: 没有上一 tag 时不猜测
-    假如仓库配置为
-      """
-      schema_version = 1
-      [branches.main]
-      version_prefix = "1.0"
-      tag_prefix = "v"
-      """
-    当执行消息命令 "message v1.0.0"
-    那么错误包含 "没有上一 tag"
+  Scenario: Reject ambiguous numeric tags
+    Given tag "v1.0.00" points to "HEAD~2"
+    When running the CLI with "m main"
+    Then the error contains "Ambiguous tag history"
 
-  场景大纲: 显式区间必须有效
-    当执行消息命令 "m <target> --from <from>"
-    那么错误包含 "<error>"
+  Scenario: Reject non-monotonic history
+    Given tag "v1.0.9" points to "HEAD~1"
+    When running the CLI with "m main"
+    Then the error contains "Non-monotonic"
 
-    例子:
-      | target  | from     | error                    |
-      | v1.0.1  | missing  | 找不到指向提交的 tag     |
-      | v1.0.1  | v1.0.1   | 无新变更                 |
-      | v1.0.0  | v1.0.1   | 不是目标                 |
-      | HEAD    | v1.0.0   | 找不到指向提交的 tag     |
-      | v1.0.1  | HEAD~1   | 非法 tag                 |
+  Scenario: Reject shallow history
+    Given running from a depth-one shallow clone
+    When running the CLI with "m main"
+    Then the error contains "shallow clone"
 
-  场景: 历史版本倒退时报错
-    假如仓库配置为
-      """
-      schema_version = 1
-      [branches.main]
-      version_prefix = "1.0"
-      tag_prefix = "v"
-      """
-    并且tag "v1.0.9" 指向 "HEAD~1"
-    当执行消息命令 "message v1.0.1"
-    那么错误包含 "版本历史不单调"
+  Scenario: Do not output partial messages
+    When running the CLI with "m main missing"
+    Then the error contains "Configure branches.missing"
 
-  场景: --from 不能应用于多个目标
-    当执行消息命令 "message v1.0.0 v1.0.1 --from v1.0.0"
-    那么错误包含 "--from 仅适用于一个目标 tag"
+  Scenario: Multi-branch messages exclude untagged commits
+    Given a local bare remote and two release branches exist
+    When running the CLI with "msg maintenance main"
+    Then the message contains "v2.0.1"
+    And the message contains "v1.0.1"
+    And the message excludes "Pending release"
+    And the message excludes "Local only"
 
-  场景: 多版本线分别选择基线
-    假如仓库配置为
-      """
-      schema_version = 1
-      [branches.main]
-      version_prefix = "1.0"
-      tag_prefix = "v"
-      [branches.maintenance]
-      version_prefix = "2.0"
-      tag_prefix = "v"
-      """
-    并且tag "v2.0.0" 指向 "HEAD~1"
-    并且tag "v2.0.1" 指向 "HEAD"
-    当执行消息命令 "message v1.0.1 v2.0.1"
-    那么消息包含 "v1.0.1"
-    并且消息包含 "v2.0.1"
+  Scenario: Preview does not create or push release tags
+    Given a local bare remote and two release branches exist
+    When running the CLI with "t main maintenance -n -p"
+    Then no new tags are created
 
-  场景: 不再支持 record 参数
-    当执行消息命令 "message --record example.json"
-    那么错误包含 "--record"
+  Scenario: Create and push tags at remote branch commits
+    Given a local bare remote and two release branches exist
+    When running the CLI with "tag main maintenance -p"
+    Then both new tags point to remote commits and are pushed without changing the worktree
 
-  场景: 同一数字的多个 tag 不自动选择
-    假如仓库配置为
-      """
-      schema_version = 1
-      [branches.main]
-      version_prefix = "1.0"
-      tag_prefix = "v"
-      """
-    并且tag "v1.0.00" 指向 "HEAD~2"
-    当执行消息命令 "message v1.0.1"
-    那么错误包含 "版本基线有歧义"
+  Scenario: Create local tags by default and retry pushing
+    Given a local bare remote and two release branches exist
+    When running the CLI with "t main"
+    Then only a local tag is created and pushing the same name can be retried
 
-  场景: 浅克隆不自动猜测基线
-    假如仓库配置为
-      """
-      schema_version = 1
-      [branches.main]
-      version_prefix = "1.0"
-      tag_prefix = "v"
-      """
-    并且从深度一的浅克隆执行
-    当执行消息命令 "message v1.0.1"
-    那么错误包含 "浅克隆无法可靠选择上一 tag"
+  Scenario: Never overwrite a conflicting tag
+    Given a local bare remote and two release branches exist
+    And tag "v1.0.2" points to "HEAD"
+    When running the CLI with "t main"
+    Then the error contains "points to another commit"
 
-  场景: 全局版本线不影响仓库
-    假如全局配置为
-      """
-      schema_version = 1
-      [branches.main]
-      version_prefix = "1.0"
-      tag_prefix = "v"
-      """
-    当执行消息命令 "message v1.0.1"
-    那么错误包含 "请配置 branches 或使用 --from"
+  Scenario: Retain successful branches after partial failure
+    Given a local bare remote and two release branches exist
+    When running the CLI with "t missing main"
+    Then the valid branch succeeds and the batch fails while retaining results
 
-  场景: 多目标任一失败时不输出半条消息
-    假如仓库配置为
-      """
-      schema_version = 1
-      [branches.main]
-      version_prefix = "1.0"
-      tag_prefix = "v"
-      """
-    当执行消息命令 "message v1.0.1 missing"
-    那么错误包含 "找不到指向提交的 tag"
+  Scenario: Retry the same tag after push rejection
+    Given a local bare remote and two release branches exist
+    And the remote temporarily rejects pushes
+    When running the CLI with "t main -p"
+    Then the rejected push retains its tag and can be retried after recovery
+
+  Scenario: Manual increment requires an explicit name
+    Given a local bare remote and two release branches exist
+    And main uses manual increment mode
+    When running the CLI with "t main"
+    Then the error contains "Manual mode requires --name"
+    When running the CLI with "t main --name v1.0.7 -n"
+    Then the message contains "v1.0.7"
+
+  Scenario: Increment numerically rather than lexically
+    Given a local bare remote and two release branches exist
+    And tag "v1.0.9" points to "HEAD~2"
+    When running the CLI with "t main -n"
+    Then the message contains "v1.0.10"
+
+  Scenario: Do not create empty releases
+    Given a local bare remote and two release branches exist
+    And tag "v1.0.2" points to "HEAD~1"
+    When running the CLI with "t main"
+    Then the message contains "No changes"
+
+  Scenario: Detached HEAD requires explicit branches
+    Given running from a linked worktree
+    When running the CLI with "m"
+    Then the error contains "Detached HEAD"
+
+  Scenario: Reject duplicate branches
+    When running the CLI with "t main main"
+    Then the error contains "Duplicate branch"

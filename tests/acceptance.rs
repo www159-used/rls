@@ -10,21 +10,25 @@ struct ReleaseWorld {
     config: Option<toml::Value>,
 }
 
-#[given("仓库中的配置示例")]
+#[given("the repository configuration example")]
 fn example_config(world: &mut ReleaseWorld) {
     world.source =
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("rls.example.toml"))
-            .expect("配置示例应可读取");
+            .expect("configuration example must be readable");
 }
 
-#[when("按 TOML 读取示例")]
+#[when("parsing the example as TOML")]
 fn parse_example(world: &mut ReleaseWorld) {
-    world.config = Some(toml::from_str(&world.source).expect("配置示例应为合法 TOML"));
+    world.config =
+        Some(toml::from_str(&world.source).expect("configuration example must be valid TOML"));
 }
 
-#[then(expr = "分支 {string} 的版本前缀为 {string}")]
+#[then(expr = "branch {string} has version prefix {string}")]
 fn branch_prefix(world: &mut ReleaseWorld, branch: String, prefix: String) {
-    let config = world.config.as_ref().expect("应先读取配置");
+    let config = world
+        .config
+        .as_ref()
+        .expect("configuration must be loaded first");
     assert_eq!(
         config["branches"][&branch]["version_prefix"].as_str(),
         Some(prefix.as_str())
@@ -35,14 +39,17 @@ fn branch_prefix(world: &mut ReleaseWorld, branch: String, prefix: String) {
     );
 }
 
-#[then("使用 git-tag 后端且消息模板存在")]
+#[then("the git-tag backend is selected and the message template exists")]
 fn backend_and_template(world: &mut ReleaseWorld) {
-    let config = world.config.as_ref().expect("应先读取配置");
+    let config = world
+        .config
+        .as_ref()
+        .expect("configuration must be loaded first");
     assert_eq!(config["schema_version"].as_integer(), Some(1));
     assert_eq!(config["release"]["backend"].as_str(), Some("git-tag"));
     let template = config["message"]["template"]
         .as_str()
-        .expect("应配置模板路径");
+        .expect("template path must be configured");
     assert!(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(template)

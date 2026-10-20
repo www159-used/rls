@@ -1,0 +1,7 @@
+# 发布本项目：cargo-release 管理版本与版本提交，tag 和推送由维护者手动完成。
+# Cargo.toml 的 publish = false 会默认禁用 release，需显式启用。
+release = true
+publish = false
+tag = false
+push = false
+pre-release-commit-message = "chore: release {{version}}"

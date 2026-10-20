@@ -16,10 +16,11 @@ struct MessageConfig {
     variables: BTreeMap<String, toml::Value>,
 }
 
-// Other sections belong to the future planner; only message settings are consumed here.
 #[derive(Debug, Deserialize)]
 struct ConfigFile {
     schema_version: u32,
+    #[serde(default)]
+    release: ReleaseConfig,
     #[serde(default)]
     message: MessageConfig,
     #[serde(default)]
@@ -27,13 +28,39 @@ struct ConfigFile {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ReleaseConfig {
+    #[serde(default = "default_remote")]
+    pub remote: String,
+}
+fn default_remote() -> String {
+    "origin".into()
+}
+impl Default for ReleaseConfig {
+    fn default() -> Self {
+        Self {
+            remote: default_remote(),
+        }
+    }
+}
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Increment {
+    #[default]
+    Counter,
+    Manual,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct BranchRule {
     pub version_prefix: String,
     pub tag_prefix: String,
+    #[serde(default)]
+    pub increment: Increment,
 }
 
 #[derive(Debug, Default)]
 pub struct ResolvedMessageConfig {
+    pub release: ReleaseConfig,
     pub branches: BTreeMap<String, BranchRule>,
     pub template: Option<PathBuf>,
     pub variables: BTreeMap<String, toml::Value>,
@@ -53,15 +80,15 @@ pub fn git_path(cwd: &Path, option: &str) -> Result<Option<PathBuf>> {
         .env("LC_ALL", "C")
         .args(["rev-parse", "--path-format=absolute", option])
         .output()
-        .context("无法运行 git rev-parse")?;
+        .context(crate::tr!("无法运行 git rev-parse"))?;
     if !output.status.success() {
         let error = String::from_utf8_lossy(&output.stderr);
         if error.contains("not a git repository") {
             return Ok(None);
         }
-        bail!("Git 目录发现失败: {}", error.trim());
+        bail!("{}", crate::tr!("Git 目录发现失败: {}", error.trim()));
     }
-    let path = String::from_utf8(output.stdout).context("Git 目录不是 UTF-8 路径")?;
+    let path = String::from_utf8(output.stdout).context(crate::tr!("Git 目录不是 UTF-8 路径"))?;
     Ok(Some(PathBuf::from(path.trim_end_matches(['\r', '\n']))))
 }
 
@@ -80,28 +107,37 @@ fn overlay(result: &mut ResolvedMessageConfig, path: &Path, repository: bool) ->
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error).with_context(|| format!("读取配置 {}", path.display())),
+        Err(error) => return Err(error).with_context(|| crate::tr!("读取配置 {}", path.display())),
     };
     let config: ConfigFile =
-        toml::from_str(&source).with_context(|| format!("解析配置 {}", path.display()))?;
+        toml::from_str(&source).with_context(|| crate::tr!("解析配置 {}", path.display()))?;
     if config.schema_version != 1 {
         bail!(
-            "配置 {} 不支持 schema_version {}",
-            path.display(),
-            config.schema_version
+            "{}",
+            crate::tr!(
+                "配置 {} 不支持 schema_version {}",
+                path.display(),
+                config.schema_version
+            )
         );
     }
     let message_version = config.message.version.unwrap_or(1);
     if message_version != 1 {
         bail!(
-            "配置 {} 不支持 message.version {}，当前仅支持 1",
-            path.display(),
-            message_version
+            "{}",
+            crate::tr!(
+                "配置 {} 不支持 message.version {}，当前仅支持 1",
+                path.display(),
+                message_version
+            )
         );
     }
     if let Some(template) = config.message.template {
         if template.as_os_str().is_empty() {
-            bail!("配置 {} 的 message.template 不能为空", path.display());
+            bail!(
+                "{}",
+                crate::tr!("配置 {} 的 message.template 不能为空", path.display())
+            );
         }
         result.template = Some(path.parent().expect("config parent").join(template));
     }
@@ -114,12 +150,17 @@ fn overlay(result: &mut ResolvedMessageConfig, path: &Path, repository: bool) ->
                 .any(|part| part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()))
             {
                 bail!(
-                    "配置 {} 的分支 {name} version_prefix 必须为点分数字",
-                    path.display()
+                    "{}",
+                    crate::tr!(
+                        "配置 {} 的分支 {name} version_prefix 必须为点分数字",
+                        path.display(),
+                        name = name
+                    )
                 );
             }
         }
         result.branches = config.branches;
+        result.release = config.release;
     }
     Ok(())
 }

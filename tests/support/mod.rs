@@ -41,22 +41,28 @@ fn fixture(world: &mut ReleaseWorld) -> &mut Fixture {
     world.fixture.as_mut().unwrap()
 }
 
-#[given("隔离的仓库、全局目录和 Git tags")]
+#[given("an isolated repository, global directory and Git tags")]
 fn setup(world: &mut ReleaseWorld) {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let global = temp.path().join("global");
     std::fs::create_dir_all(&repo).unwrap();
     std::fs::create_dir_all(&global).unwrap();
-    git(&repo, &["init", "-q"]);
+    git(&repo, &["init", "-q", "-b", "main"]);
     std::fs::write(repo.join("user.txt"), "original").unwrap();
     git(&repo, &["add", "user.txt"]);
     git(&repo, &["commit", "-qm", "initial"]);
     git(&repo, &["tag", "v1.0.0"]);
-    git(&repo, &["commit", "--allow-empty", "-qm", "修复一"]);
-    git(&repo, &["commit", "--allow-empty", "-qm", "修复二"]);
+    git(&repo, &["commit", "--allow-empty", "-qm", "First fix"]);
+    git(&repo, &["commit", "--allow-empty", "-qm", "Second fix"]);
     git(&repo, &["tag", "-a", "v1.0.1", "-m", "annotated release"]);
     std::fs::write(repo.join("user.txt"), "user edits").unwrap();
+    std::fs::create_dir_all(repo.join(".git/rls")).unwrap();
+    std::fs::write(
+        repo.join(".git/rls/config.toml"),
+        "schema_version = 1\n[branches.main]\nversion_prefix = \"1.0\"\ntag_prefix = \"v\"\n",
+    )
+    .unwrap();
     let original_refs = git_text(&repo, &["show-ref"]);
     let original_status = git_text(&repo, &["status", "--porcelain"]);
     world.fixture = Some(Fixture {
@@ -70,24 +76,28 @@ fn setup(world: &mut ReleaseWorld) {
     });
 }
 
-#[given(expr = "{word}配置为")]
+#[given(expr = "the {word} configuration is")]
 fn config(world: &mut ReleaseWorld, layer: String, step: &Step) {
     let f = fixture(world);
     let path = match layer.as_str() {
-        "全局" => f.global.join("config.toml"),
-        "仓库" => f.repo.join(".git/rls/config.toml"),
+        "global" => f.global.join("config.toml"),
+        "repository" => f.repo.join(".git/rls/config.toml"),
         _ => panic!("unknown layer"),
     };
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, step.docstring.as_ref().unwrap()).unwrap();
+    let mut source = step.docstring.as_ref().unwrap().clone();
+    if layer == "repository" && !source.contains("[branches.") {
+        source.push_str("\n[branches.main]\nversion_prefix = \"1.0\"\ntag_prefix = \"v\"\n");
+    }
+    std::fs::write(path, source).unwrap();
 }
 
-#[given(expr = "{word}模板为")]
+#[given(expr = "the {word} template is")]
 fn template(world: &mut ReleaseWorld, layer: String, step: &Step) {
     let f = fixture(world);
     let root = match layer.as_str() {
-        "全局" => f.global.clone(),
-        "仓库" => f.repo.join(".git/rls"),
+        "global" => f.global.clone(),
+        "repository" => f.repo.join(".git/rls"),
         _ => panic!("unknown layer"),
     };
     std::fs::create_dir_all(root.join("templates")).unwrap();
@@ -98,14 +108,14 @@ fn template(world: &mut ReleaseWorld, layer: String, step: &Step) {
     .unwrap();
 }
 
-#[given("从仓库子目录执行")]
+#[given("running from a repository subdirectory")]
 fn subdir(world: &mut ReleaseWorld) {
     let f = fixture(world);
     f.cwd = f.repo.join("nested/child");
     std::fs::create_dir_all(&f.cwd).unwrap();
 }
 
-#[given("从 linked worktree 执行")]
+#[given("running from a linked worktree")]
 fn worktree(world: &mut ReleaseWorld) {
     let f = fixture(world);
     f.cwd = f._temp.path().join("worktree");
@@ -115,27 +125,28 @@ fn worktree(world: &mut ReleaseWorld) {
     );
 }
 
-#[given("从仓库外执行")]
+#[given("running outside the repository")]
 fn outside(world: &mut ReleaseWorld) {
     let f = fixture(world);
     f.cwd = f._temp.path().into();
 }
 
-#[when("生成消息")]
+#[when("generating the message")]
 fn run(world: &mut ReleaseWorld) {
     let f = fixture(world);
     f.output = Some(
         Command::new(env!("CARGO_BIN_EXE_rls"))
             .current_dir(&f.cwd)
             .env("RLS_CONFIG_HOME", &f.global)
+            .env("RLS_LANG", "en")
             .arg("message")
-            .args(["v1.0.1", "--from", "v1.0.0"])
+            .arg("main")
             .output()
             .unwrap(),
     );
 }
 
-#[when("将消息写入文件")]
+#[when("writing the message to a file")]
 fn run_file(world: &mut ReleaseWorld) {
     let f = fixture(world);
     let destination = f._temp.path().join("message.txt");
@@ -143,8 +154,9 @@ fn run_file(world: &mut ReleaseWorld) {
         Command::new(env!("CARGO_BIN_EXE_rls"))
             .current_dir(&f.cwd)
             .env("RLS_CONFIG_HOME", &f.global)
+            .env("RLS_LANG", "en")
             .arg("message")
-            .args(["v1.0.1", "--from", "v1.0.0"])
+            .arg("main")
             .arg("--output")
             .arg(&destination)
             .output()
@@ -154,11 +166,11 @@ fn run_file(world: &mut ReleaseWorld) {
     assert!(f.output.as_ref().unwrap().stdout.is_empty());
     assert_eq!(
         std::fs::read_to_string(destination).unwrap(),
-        "v1.0.1\nchangelog:\n修复一\n修复二\n"
+        "v1.0.1\nchangelog:\nFirst fix\nSecond fix\n"
     );
 }
 
-#[then(expr = "消息包含 {string}")]
+#[then(expr = "the message contains {string}")]
 fn contains(world: &mut ReleaseWorld, expected: String) {
     let output = fixture(world).output.as_ref().unwrap();
     assert!(
@@ -173,7 +185,7 @@ fn contains(world: &mut ReleaseWorld, expected: String) {
     );
 }
 
-#[then(expr = "错误包含 {string}")]
+#[then(expr = "the error contains {string}")]
 fn error(world: &mut ReleaseWorld, expected: String) {
     let output = fixture(world).output.as_ref().unwrap();
     assert!(!output.status.success());
@@ -185,7 +197,7 @@ fn error(world: &mut ReleaseWorld, expected: String) {
     );
 }
 
-#[then("消息包含区间内全部提交且保持顺序和换行")]
+#[then("the message contains all commits in order with preserved newlines")]
 fn exact(world: &mut ReleaseWorld) {
     let output = fixture(world).output.as_ref().unwrap();
     assert!(
@@ -195,12 +207,12 @@ fn exact(world: &mut ReleaseWorld) {
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "v1.0.1\nchangelog:\n修复一\n修复二\n"
+        "v1.0.1\nchangelog:\nFirst fix\nSecond fix\n"
     );
     assert!(output.stderr.is_empty());
 }
 
-#[then("工作区和 Git 引用保持不变且未生成 records")]
+#[then("the worktree and Git refs are unchanged and no records are created")]
 fn unchanged(world: &mut ReleaseWorld) {
     let f = fixture(world);
     assert_eq!(git_text(&f.repo, &["show-ref"]), f.original_refs);
@@ -215,18 +227,22 @@ fn unchanged(world: &mut ReleaseWorld) {
     assert!(!f.repo.join(".rls").exists());
 }
 
-#[given("仓库模板使用绝对路径")]
+#[given("the repository template uses an absolute path")]
 fn absolute_template(world: &mut ReleaseWorld) {
     let f = fixture(world);
     let template = f._temp.path().join("absolute.j2");
-    std::fs::write(&template, "绝对模板|{{ releases[0].tag }}").unwrap();
+    std::fs::write(&template, "Absolute template|{{ releases[0].tag }}").unwrap();
     let source = format!(
         "schema_version = 1\n[message]\ntemplate = {}\n",
         toml::Value::String(template.to_str().unwrap().into())
     );
     let config = f.repo.join(".git/rls/config.toml");
     std::fs::create_dir_all(config.parent().unwrap()).unwrap();
-    std::fs::write(config, source).unwrap();
+    std::fs::write(
+        config,
+        format!("{source}\n[branches.main]\nversion_prefix = \"1.0\"\ntag_prefix = \"v\"\n"),
+    )
+    .unwrap();
 }
 
 fn git_text(cwd: &Path, args: &[&str]) -> String {
@@ -243,25 +259,26 @@ fn git_text(cwd: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
-#[when(expr = "执行消息命令 {string}")]
+#[when(expr = "running the CLI with {string}")]
 fn custom_command(world: &mut ReleaseWorld, arguments: String) {
     let f = fixture(world);
     f.output = Some(
         Command::new(env!("CARGO_BIN_EXE_rls"))
             .current_dir(&f.cwd)
             .env("RLS_CONFIG_HOME", &f.global)
+            .env("RLS_LANG", "en")
             .args(arguments.split_whitespace())
             .output()
             .unwrap(),
     );
 }
 
-#[given(expr = "tag {string} 指向 {string}")]
+#[given(expr = "tag {string} points to {string}")]
 fn add_tag(world: &mut ReleaseWorld, tag: String, reference: String) {
     git(&fixture(world).repo, &["tag", &tag, &reference]);
 }
 
-#[given("存在不相关分支上的同版本线 tag")]
+#[given("a matching tag exists on unrelated history")]
 fn unrelated(world: &mut ReleaseWorld) {
     let f = fixture(world);
     let tree = git_text(&f.repo, &["rev-parse", "HEAD^{tree}"]);
@@ -284,7 +301,7 @@ fn unrelated(world: &mut ReleaseWorld) {
     git(&f.repo, &["tag", "v9.0.99", sha.trim()]);
 }
 
-#[then(expr = "消息不包含 {string}")]
+#[then(expr = "the message excludes {string}")]
 fn excludes(world: &mut ReleaseWorld, expected: String) {
     let output = fixture(world).output.as_ref().unwrap();
     assert!(
@@ -295,7 +312,7 @@ fn excludes(world: &mut ReleaseWorld, expected: String) {
     assert!(!String::from_utf8_lossy(&output.stdout).contains(&expected));
 }
 
-#[given("从深度一的浅克隆执行")]
+#[given("running from a depth-one shallow clone")]
 fn shallow(world: &mut ReleaseWorld) {
     let f = fixture(world);
     f.cwd = f._temp.path().join("shallow");
@@ -314,4 +331,124 @@ fn shallow(world: &mut ReleaseWorld) {
         std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
         std::fs::copy(source, destination).unwrap();
     }
+}
+
+#[given("a local bare remote and two release branches exist")]
+fn remote_fixture(world: &mut ReleaseWorld) {
+    let f = fixture(world);
+    let remote = f._temp.path().join("remote.git");
+    git(&f.repo, &["init", "--bare", remote.to_str().unwrap()]);
+    git(
+        &f.repo,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    );
+    git(&f.repo, &["branch", "maintenance"]);
+    git(&f.repo, &["tag", "v2.0.0", "HEAD~2"]);
+    git(&f.repo, &["tag", "v2.0.1", "HEAD"]);
+    git(
+        &f.repo,
+        &["commit", "--allow-empty", "-qm", "Pending release"],
+    );
+    git(&f.repo, &["branch", "-f", "maintenance", "HEAD"]);
+    git(
+        &f.repo,
+        &["push", "origin", "main", "maintenance", "--tags"],
+    );
+    git(&f.repo, &["commit", "--allow-empty", "-qm", "Local only"]);
+    std::fs::write(f.repo.join(".git/rls/config.toml"), "schema_version=1\n[branches.main]\nversion_prefix='1.0'\ntag_prefix='v'\n[branches.maintenance]\nversion_prefix='2.0'\ntag_prefix='v'\n").unwrap();
+}
+
+#[then("both new tags point to remote commits and are pushed without changing the worktree")]
+fn pushed(world: &mut ReleaseWorld) {
+    let f = fixture(world);
+    assert!(
+        f.output.as_ref().unwrap().status.success(),
+        "{:?}",
+        f.output
+    );
+    let target = git_text(&f.repo, &["rev-parse", "HEAD~1"]);
+    for tag in ["v1.0.2", "v2.0.2"] {
+        assert_eq!(git_text(&f.repo, &["rev-parse", tag]), target);
+        assert!(
+            git_text(&f.repo, &["ls-remote", "--tags", "origin", tag]).starts_with(target.trim())
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(f.repo.join("user.txt")).unwrap(),
+        "user edits"
+    );
+}
+
+#[then("no new tags are created")]
+fn no_new_tags(world: &mut ReleaseWorld) {
+    let f = fixture(world);
+    assert!(f.output.as_ref().unwrap().status.success());
+    assert!(!git_text(&f.repo, &["tag", "--list"]).contains("v1.0.2"));
+    assert!(!git_text(&f.repo, &["ls-remote", "--tags", "origin"]).contains("v1.0.2"));
+}
+
+#[then("only a local tag is created and pushing the same name can be retried")]
+fn retry_push(world: &mut ReleaseWorld) {
+    let f = fixture(world);
+    assert!(f.output.as_ref().unwrap().status.success());
+    assert!(git_text(&f.repo, &["ls-remote", "--tags", "origin", "v1.0.2"]).is_empty());
+    custom_command(world, "t main --name v1.0.2 -p".into());
+    let f = fixture(world);
+    assert!(
+        f.output.as_ref().unwrap().status.success(),
+        "{:?}",
+        f.output
+    );
+    assert!(!git_text(&f.repo, &["ls-remote", "--tags", "origin", "v1.0.2"]).is_empty());
+    assert!(!git_text(&f.repo, &["tag", "--list"]).contains("v1.0.3"));
+}
+
+#[given("main uses manual increment mode")]
+fn manual(world: &mut ReleaseWorld) {
+    let f = fixture(world);
+    let path = f.repo.join(".git/rls/config.toml");
+    let source = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("[branches.main]", "[branches.main]\nincrement='manual'");
+    std::fs::write(path, source).unwrap();
+}
+
+#[then("the valid branch succeeds and the batch fails while retaining results")]
+fn partial(world: &mut ReleaseWorld) {
+    let f = fixture(world);
+    let output = f.output.as_ref().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("v1.0.2"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("branches.missing"));
+    assert_eq!(
+        git_text(&f.repo, &["rev-parse", "v1.0.2"]),
+        git_text(&f.repo, &["rev-parse", "HEAD~1"])
+    );
+}
+
+#[given("the remote temporarily rejects pushes")]
+fn reject_push(world: &mut ReleaseWorld) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = fixture(world)
+        ._temp
+        .path()
+        .join("remote.git/hooks/pre-receive");
+    std::fs::write(&path, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[then("the rejected push retains its tag and can be retried after recovery")]
+fn failed_push_retry(world: &mut ReleaseWorld) {
+    let f = fixture(world);
+    assert!(!f.output.as_ref().unwrap().status.success());
+    assert!(String::from_utf8_lossy(&f.output.as_ref().unwrap().stderr).contains("--name v1.0.2"));
+    assert_eq!(
+        git_text(&f.repo, &["rev-parse", "v1.0.2"]),
+        git_text(&f.repo, &["rev-parse", "HEAD~1"])
+    );
+    std::fs::remove_file(f._temp.path().join("remote.git/hooks/pre-receive")).unwrap();
+    custom_command(world, "t main --name v1.0.2 -p".into());
+    let f = fixture(world);
+    assert!(f.output.as_ref().unwrap().status.success());
+    assert!(!git_text(&f.repo, &["ls-remote", "--tags", "origin", "v1.0.2"]).is_empty());
 }

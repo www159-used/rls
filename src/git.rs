@@ -16,19 +16,22 @@ fn command(cwd: &Path, args: &[&str]) -> Result<Output> {
         .args(["--no-pager", "--no-replace-objects"])
         .args(args)
         .output()
-        .context("无法执行 Git")
+        .context(crate::tr!("无法执行 Git"))
 }
 
 fn text(cwd: &Path, args: &[&str]) -> Result<String> {
     let output = command(cwd, args)?;
     if !output.status.success() {
         bail!(
-            "Git {} 失败: {}",
-            args[0],
-            String::from_utf8_lossy(&output.stderr).trim()
+            "{}",
+            crate::tr!(
+                "Git {} 失败: {}",
+                args[0],
+                String::from_utf8_lossy(&output.stderr).trim()
+            )
         );
     }
-    String::from_utf8(output.stdout).context("Git 输出不是 UTF-8")
+    String::from_utf8(output.stdout).context(crate::tr!("Git 输出不是 UTF-8"))
 }
 
 fn tag_sha(cwd: &Path, tag: &str) -> Result<String> {
@@ -37,7 +40,7 @@ fn tag_sha(cwd: &Path, tag: &str) -> Result<String> {
         .status
         .success()
     {
-        bail!("非法 tag 名称: {tag}");
+        bail!("{}", crate::tr!("非法 tag 名称: {tag}", tag = tag));
     }
     text(
         cwd,
@@ -49,7 +52,12 @@ fn tag_sha(cwd: &Path, tag: &str) -> Result<String> {
         ],
     )
     .map(|sha| sha.trim().to_owned())
-    .with_context(|| format!("找不到指向提交的 tag {tag}；请确认本地已有所需 tags"))
+    .with_context(|| {
+        crate::tr!(
+            "找不到指向提交的 tag {tag}；请确认本地已有所需 tags",
+            tag = tag
+        )
+    })
 }
 
 fn ancestor(cwd: &Path, old: &str, new: &str) -> Result<bool> {
@@ -58,8 +66,11 @@ fn ancestor(cwd: &Path, old: &str, new: &str) -> Result<bool> {
         Some(0) => Ok(true),
         Some(1) => Ok(false),
         _ => bail!(
-            "Git 祖先检查失败: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+            "{}",
+            crate::tr!(
+                "Git 祖先检查失败: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )
         ),
     }
 }
@@ -73,51 +84,10 @@ fn number(tag: &str, rule: &BranchRule) -> Option<u64> {
     suffix.parse().ok()
 }
 
-fn previous(
+fn release(
     cwd: &Path,
     tag: &str,
-    target_sha: &str,
-    rule: &BranchRule,
-    target_number: u64,
-) -> Result<(String, String)> {
-    let tags = text(
-        cwd,
-        &["for-each-ref", "--format=%(refname:strip=2)", "refs/tags/"],
-    )?;
-    let mut candidates = Vec::new();
-    for candidate in tags.lines().filter(|candidate| *candidate != tag) {
-        let Some(n) = number(candidate, rule) else {
-            continue;
-        };
-        let sha = tag_sha(cwd, candidate)?;
-        if !ancestor(cwd, &sha, target_sha)? {
-            continue;
-        }
-        if n >= target_number {
-            bail!("版本历史不单调: {candidate} 是 {tag} 的祖先；请用 --from 显式指定基线");
-        }
-        candidates.push((n, candidate.to_owned(), sha));
-    }
-    candidates.sort_by_key(|item| item.0);
-    for pair in candidates.windows(2) {
-        if pair[0].0 == pair[1].0 || !ancestor(cwd, &pair[0].2, &pair[1].2)? {
-            bail!(
-                "版本基线有歧义: {} 与 {}；请用 --from 显式指定基线",
-                pair[0].1,
-                pair[1].1
-            );
-        }
-    }
-    let (_, name, sha) = candidates
-        .pop()
-        .context("没有上一 tag；请用 --from 显式指定基线")?;
-    Ok((name, sha))
-}
-
-pub fn release(
-    cwd: &Path,
-    tag: &str,
-    from: Option<&str>,
+    from: &str,
     branches: &BTreeMap<String, BranchRule>,
 ) -> Result<Release> {
     let sha = tag_sha(cwd, tag)?;
@@ -126,7 +96,10 @@ pub fn release(
         .filter_map(|(branch, rule)| number(tag, rule).map(|n| (branch, rule, n)))
         .collect();
     if matching.len() > 1 {
-        bail!("tag {tag} 匹配多个分支版本线，请修正仓库配置");
+        bail!(
+            "{}",
+            crate::tr!("tag {tag} 匹配多个分支版本线，请修正仓库配置", tag = tag)
+        );
     }
     let (branch, version) = matching
         .first()
@@ -137,22 +110,26 @@ pub fn release(
             )
         })
         .unwrap_or_else(|| (String::new(), tag.to_owned()));
-    let (previous_tag, previous_sha) = if let Some(from) = from {
-        (from.to_owned(), tag_sha(cwd, from)?)
-    } else {
-        let (_, rule, n) = matching
-            .first()
-            .context("目标 tag 未匹配仓库版本线；请配置 branches 或使用 --from")?;
-        if text(cwd, &["rev-parse", "--is-shallow-repository"])?.trim() == "true" {
-            bail!("浅克隆无法可靠选择上一 tag，请补全历史或用 --from 指定可验证的基线");
-        }
-        previous(cwd, tag, &sha, rule, *n)?
-    };
+    let (previous_tag, previous_sha) = (from.to_owned(), tag_sha(cwd, from)?);
     if !ancestor(cwd, &previous_sha, &sha)? {
-        bail!("基线 {previous_tag} 不是目标 {tag} 的祖先");
+        bail!(
+            "{}",
+            crate::tr!(
+                "基线 {previous_tag} 不是目标 {tag} 的祖先",
+                previous_tag = previous_tag,
+                tag = tag
+            )
+        );
     }
     if previous_sha == sha {
-        bail!("无新变更: {previous_tag} 与 {tag} 指向同一提交");
+        bail!(
+            "{}",
+            crate::tr!(
+                "无新变更: {previous_tag} 与 {tag} 指向同一提交",
+                previous_tag = previous_tag,
+                tag = tag
+            )
+        );
     }
     let range = format!("{previous_sha}..{sha}");
     let log = text(
@@ -170,7 +147,9 @@ pub fn release(
     let commits = log
         .lines()
         .map(|line| {
-            let (sha, subject) = line.split_once('\0').context("无法解析 Git 提交输出")?;
+            let (sha, subject) = line
+                .split_once('\0')
+                .context(crate::tr!("无法解析 Git 提交输出"))?;
             Ok(Commit {
                 sha: sha.into(),
                 subject: subject.into(),
@@ -186,4 +165,212 @@ pub fn release(
         branch,
         commits,
     })
+}
+
+pub fn branches(cwd: &Path, mut names: Vec<String>) -> Result<Vec<String>> {
+    if names.is_empty() {
+        names.push(
+            text(cwd, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+                .context(crate::tr!("detached HEAD 请显式指定分支"))?
+                .trim()
+                .into(),
+        );
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for name in &names {
+        text(cwd, &["check-ref-format", &format!("refs/heads/{name}")])?;
+        if !seen.insert(name) {
+            bail!("{}", crate::tr!("重复分支: {name}", name = name));
+        }
+    }
+    Ok(names)
+}
+
+fn history(cwd: &Path, target: &str, rule: &BranchRule) -> Result<Vec<(u64, String, String)>> {
+    if text(cwd, &["rev-parse", "--is-shallow-repository"])?.trim() == "true" {
+        bail!("{}", crate::tr!("浅克隆无法可靠选择上一 tag，请补全历史"));
+    }
+    let mut entries = Vec::new();
+    for tag in text(
+        cwd,
+        &["for-each-ref", "--format=%(refname:strip=2)", "refs/tags/"],
+    )?
+    .lines()
+    {
+        if let Some(n) = number(tag, rule) {
+            let sha = tag_sha(cwd, tag)?;
+            if ancestor(cwd, &sha, target)? {
+                entries.push((n, tag.to_owned(), sha));
+            }
+        }
+    }
+    entries.sort_by_key(|item| item.0);
+    for pair in entries.windows(2) {
+        if pair[0].0 == pair[1].0 {
+            bail!(
+                "{}",
+                crate::tr!("版本基线有歧义: {} / {}", pair[0].1, pair[1].1)
+            );
+        }
+        if !ancestor(cwd, &pair[0].2, &pair[1].2)? {
+            bail!(
+                "{}",
+                crate::tr!("版本历史不单调或分叉: {} / {}", pair[0].1, pair[1].1)
+            );
+        }
+    }
+    Ok(entries)
+}
+
+pub fn branch_release(
+    cwd: &Path,
+    branch: &str,
+    settings: &crate::config::ResolvedMessageConfig,
+) -> Result<Release> {
+    let rule = settings
+        .branches
+        .get(branch)
+        .with_context(|| crate::tr!("请配置 branches.{branch}", branch = branch))?;
+    let local = format!("refs/heads/{branch}");
+    let remote = format!("refs/remotes/{}/{branch}", settings.release.remote);
+    let reference = if command(cwd, &["show-ref", "--verify", "--quiet", &local])?
+        .status
+        .success()
+    {
+        local
+    } else {
+        remote
+    };
+    let target = text(
+        cwd,
+        &[
+            "rev-parse",
+            "--verify",
+            "--end-of-options",
+            &format!("{reference}^{{commit}}"),
+        ],
+    )?;
+    let entries = history(cwd, target.trim(), rule)?;
+    if entries.len() < 2 {
+        bail!(
+            "{}",
+            crate::tr!("分支 {branch} 需要至少两个 tag", branch = branch)
+        );
+    }
+    let latest = &entries[entries.len() - 1];
+    let previous = &entries[entries.len() - 2];
+    let mut result = release(cwd, &latest.1, &previous.1, &settings.branches)?;
+    result.branch = branch.into();
+    Ok(result)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn create_tag(
+    cwd: &Path,
+    branch: &str,
+    settings: &crate::config::ResolvedMessageConfig,
+    remote: Option<&str>,
+    name: Option<&str>,
+    dry_run: bool,
+    push: bool,
+) -> Result<String> {
+    let rule = settings
+        .branches
+        .get(branch)
+        .with_context(|| crate::tr!("请配置 branches.{branch}", branch = branch))?;
+    let remote = remote.unwrap_or(&settings.release.remote);
+    // Only configured remote names: never interpret a URL or option from configuration.
+    if !text(cwd, &["remote"])?.lines().any(|r| r == remote) || remote.starts_with('-') {
+        bail!("{}", crate::tr!("不存在 remote {remote}", remote = remote));
+    }
+    let branch_ref = format!("refs/heads/{branch}");
+    text(cwd, &["fetch", "--no-tags", remote, &branch_ref])?;
+    let target = text(cwd, &["rev-parse", "--verify", "FETCH_HEAD^{commit}"])?
+        .trim()
+        .to_owned();
+    text(
+        cwd,
+        &["fetch", "--no-tags", remote, "refs/tags/*:refs/tags/*"],
+    )?;
+    let entries = history(cwd, &target, rule)?;
+    let tag = if let Some(name) = name {
+        if number(name, rule).is_none() {
+            bail!("{}", crate::tr!("--name 必须匹配分支版本线"));
+        }
+        name.to_owned()
+    } else {
+        if rule.increment == crate::config::Increment::Manual {
+            bail!("{}", crate::tr!("manual 模式需要 --name"));
+        }
+        let latest = entries
+            .last()
+            .context(crate::tr!("没有基线 tag，首次发布请使用 --name"))?;
+        if latest.2 == target {
+            return Ok(crate::tr!(
+                "无新变更 ({})；如需补推请使用 --name {} --push",
+                latest.1,
+                latest.1
+            ));
+        }
+        let n = latest
+            .0
+            .checked_add(1)
+            .context(crate::tr!("tag 计数溢出"))?;
+        format!("{}{}.{}", rule.tag_prefix, rule.version_prefix, n)
+    };
+    let reference = format!("refs/tags/{tag}");
+    text(cwd, &["check-ref-format", &reference])?;
+    let exists = command(cwd, &["show-ref", "--verify", "--quiet", &reference])?
+        .status
+        .success();
+    if exists {
+        if tag_sha(cwd, &tag)? != target {
+            bail!(
+                "{}",
+                crate::tr!("tag {tag} 已指向其他提交，拒绝覆盖", tag = tag)
+            );
+        }
+    } else if let Some(latest) = entries.last() {
+        if number(&tag, rule).unwrap() <= latest.0 {
+            bail!("{}", crate::tr!("新 tag 必须大于上一版本 {}", latest.1));
+        }
+        if latest.2 == target {
+            bail!("{}", crate::tr!("无新变更，拒绝创建空版本"));
+        }
+    }
+    if dry_run {
+        return Ok(crate::tr!(
+            "预览 {tag} -> {target}{}",
+            if push { " (push)" } else { "" },
+            tag = tag,
+            target = target
+        ));
+    }
+    let current = text(cwd, &["ls-remote", "--heads", remote, &branch_ref])?;
+    if current.split_whitespace().next() != Some(target.as_str()) {
+        bail!("{}", crate::tr!("远端分支已变化，请重新执行"));
+    }
+    if !exists {
+        // Compare-and-set creates a lightweight tag without replacing concurrent changes.
+        text(cwd, &["update-ref", &reference, &target, ""])?;
+    }
+    if push {
+        text(cwd, &["push", remote, &format!("{reference}:{reference}")]).with_context(|| {
+            crate::tr!(
+                "本地 {tag} 已保留；使用 tag {branch} --name {tag} --push 重试",
+                tag = tag,
+                branch = branch
+            )
+        })?;
+    }
+    Ok(format!(
+        "{tag} -> {target} ({})",
+        if push {
+            crate::tr!("已推送")
+        } else if exists {
+            crate::tr!("已存在")
+        } else {
+            crate::tr!("已创建")
+        }
+    ))
 }

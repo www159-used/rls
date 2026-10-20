@@ -39,15 +39,17 @@ changelog:
 [branches."5.6"]
 version_prefix = "5.6.0"
 tag_prefix = "v"
+increment = "counter"
 
 [branches."5.6-2sync"]
 version_prefix = "5.6.1"
 tag_prefix = "v"
+increment = "counter"
 ```
 
-这些规则只读取仓库配置，不从全局继承。第一条匹配 `v5.6.0.<非负整数>`。目标 tag 必须只匹配一条规则；找出其祖先中的同线 tag，按末位数字取最大值作为上一 tag。若历史版本顺序不一致、存在数字重复或分叉歧义，要求显式 --from；不会自动猜测或跳号。
+这些规则只读取仓库配置，不从全局继承。第一条匹配 `v5.6.0.<非负整数>`。msg 选择分支可达的同线 tag，按数字排序取最近两个；历史倒退、数字重复或分叉歧义时报错，不接受 --from。version 去除 tag_prefix，branch 为请求的配置键。
 
-`--from` 可以使用任意已有 tag，不要求匹配版本线，但必须为目标祖先。有配置规则时 version 去除 tag_prefix，branch 为匹配的配置键；无匹配规则时 version 保留完整目标 tag，branch 为空。所有 tag 均解析到提交 SHA 后再读取区间。
+`increment` 支持 counter（默认，末位加一）或 manual（tag 命令必须指定 --name）。仓库 `[release] remote = "origin"` 指定远端，命令 -r 可覆盖；推送仅由 -p/--push 启用。顶层 schema_version 仍为 1，新字段省略时保持默认。
 
 ## 模板数据
 
@@ -57,8 +59,8 @@ tag_prefix = "v"
 |---|---|
 | tag / previous_tag | 目标及基线 tag 名 |
 | sha / previous_sha | 解析后的提交 SHA |
-| version | 去掉匹配规则 tag_prefix 的版本，或无规则时的完整 tag |
-| branch | 匹配的仓库版本线配置键，无规则时为空 |
+| version | 去掉匹配规则 tag_prefix 的版本， |
+| branch | 匹配的仓库版本线配置键 |
 | commits | 基线之后直到目标的全部提交，每条包含 sha、subject |
 
-`releases` 按命令参数顺序排列，commits 使用反向拓扑顺序，包含合并提交。不提供 release_id 或 status，也不保存 records。输入的 tag 必须在当前仓库内；linked worktree 共用 Git 引用和配置。
+`releases` 按命令参数顺序排列，commits 使用反向拓扑顺序，包含合并提交。不提供 release_id 或 status，也不保存 records。消息使用的 tag 必须在当前仓库内；linked worktree 共用 Git 引用和配置。

@@ -1,19 +1,19 @@
-# language: zh-CN
+# language: en
 @configuration-example
-功能: 配置示例保持可用
-  这是配置文档的检查，不代表发布流程已经实现；消息功能由独立场景验收。
+Feature: Configuration example remains valid
+  Configuration checks are separate from release behavior acceptance tests.
 
-  背景:
-    假如仓库中的配置示例
-    当按 TOML 读取示例
+  Background:
+    Given the repository configuration example
+    When parsing the example as TOML
 
-  场景大纲: 维护分支分别声明版本线
-    那么分支 "<branch>" 的版本前缀为 "<prefix>"
+  Scenario Outline: Maintenance branches declare distinct version lines
+    Then branch "<branch>" has version prefix "<prefix>"
 
-    例子:
+    Examples:
       | branch    | prefix |
       | 5.6       | 5.6.0  |
       | 5.6-2sync | 5.6.1  |
 
-  场景: 首期后端和模板可供使用
-    那么使用 git-tag 后端且消息模板存在
+  Scenario: Backend and template are available
+    Then the git-tag backend is selected and the message template exists

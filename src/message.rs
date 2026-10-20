@@ -28,19 +28,19 @@ pub fn render(releases: &[Release], config: &ResolvedMessageConfig) -> Result<St
         Some(path) => (
             path.display().to_string(),
             std::fs::read_to_string(path)
-                .with_context(|| format!("读取消息模板 {}", path.display()))?,
+                .with_context(|| crate::tr!("读取消息模板 {}", path.display()))?,
         ),
-        None => ("内置消息模板".into(), DEFAULT_TEMPLATE.into()),
+        None => (crate::tr!("内置消息模板"), DEFAULT_TEMPLATE.into()),
     };
     let mut env = Environment::new();
     env.set_undefined_behavior(UndefinedBehavior::Strict);
     env.set_keep_trailing_newline(true);
     env.add_template(&name, &source)
-        .with_context(|| format!("解析消息模板 {name}"))?;
+        .with_context(|| crate::tr!("解析消息模板 {name}", name = name))?;
     env.get_template(&name)?
         .render(context! {
             releases => releases,
             variables => &config.variables,
         })
-        .with_context(|| format!("渲染消息模板 {name}"))
+        .with_context(|| crate::tr!("渲染消息模板 {name}", name = name))
 }

@@ -1,55 +1,63 @@
 # rls
 
-面向多分支、多技术栈项目的发布 CLI：生成发布计划、执行发布动作，再用 changelog 和模板生成可复制的消息。
-
-状态：已实现可配置的 `message` 命令，以及 OpenSpec 与 Cucumber 基础设施。`plan`、`run` 和发布后端尚待实现。
-
-## 为什么单独做
-
-`crsu` 负责代码评审与合入，`rls` 负责版本和发布。发布流程以 Git 提交为输入，不依赖 Crucible、Jira 或某一种语言。
-
-首期提供 `git-tag` 后端，覆盖维护分支打补丁 tag 的场景。随后接入 `cargo release`，由它负责 Rust 包的版本和发布动作。非 Rust 项目可以使用 `git-tag`，有版本文件或制品发布需求时再增加对应后端。
-
-## 预期用法
+多分支发布 CLI：按远端提交递增 Git tag，从各分支最近两个 tag 之间的提交生成可配置消息。提供 Bash、Zsh、Fish 补全和中英文界面。
 
 ```bash
-# 读取配置，核对远端提交，生成可审阅的发布计划
-rls plan 5.6 5.6-2sync
-
-# 执行已保存的计划；是否推送由计划中的动作决定
-rls run <plan-id>
-
-# 从已有 tag 与提交生成消息，并复制到剪贴板
-rls message v5.6.0.4 --copy
+rls t 5.6 5.6-2sync -n       # 预览，会 fetch 引用
+rls t 5.6 5.6-2sync          # 仅创建本地 tag
+rls t 5.6 5.6-2sync -p       # 创建并推送所选 tag
+rls m 5.6 5.6-2sync -c       # 合并消息并复制
 ```
 
-计划包含版本、目标提交、前后 tag、changelog 和实际执行动作。消息可随模板修改而重新生成，无需维护发布记录或重复打 tag。
-
-## 项目资料
-
-- [产品目标、架构与实施顺序](openspec/project.md)
-- [开发流程规范](openspec/specs/development-workflow/spec.md)
-- [仓库配置示例](rls.example.toml)
-- [全局消息配置示例](rls.global.example.toml)
-- [消息模板示例](templates/release-message.md.j2)
-
-使用 Rust 实现 CLI。第一版采用内置后端接口，不建设动态插件系统，也不提供默认发送聊天消息的功能。
-
-消息支持自定义模板和变量。默认读取共享 Git 元目录的 `rls/config.toml`（普通仓库为 `.git/rls/config.toml`），继承全局消息设置，仓库同名字段优先。全局目录沿用系统用户配置目录约定，支持 `RLS_CONFIG_HOME` 覆盖；macOS 默认为 `~/Library/Application Support/rls`。相对模板路径以声明它的配置文件目录为基准。详见 [配置规则与验收场景](openspec/project.md)。
+`tag/t` 和 `message/msg/m` 均接受分支列表，省略使用当前分支；detached HEAD 需显式指定。重复分支报错。当前不支持 `plan/run`、制品发布或 Cargo 后端；本项目自身的 cargo-release 工具配置是独立的开发流程。
 
 ## 安装与更新
 
 ```bash
-cd /Users/ww/Documents/self/rls
+cd /path/to/rls
 make install
 export PATH="$HOME/.local/bin:$PATH"
 rehash
 rls --version
 ```
 
-需要 Rust/Cargo 和 make。后续更新代码后再次运行 `make install` 即可；默认安装到 `~/.local/bin`，可通过 `make install PREFIX=/自定义目录` 修改。确保 `~/.local/bin` 位于 PATH 前面；系统可能有 Rust 工具链自带的同名 `rls`，可用 `command -v rls` 检查，预期为 `~/.local/bin/rls`。安装后可以直接运行 `rls message <目标tag> --from <基线tag>`。
+需要 rustup 和 make。仓库的 `rust-toolchain.toml` 固定 Rust 1.95.0（含 rustfmt、Clippy），Cargo.toml 声明 rust-version = 1.95。后续更新代码后再次运行 `make install` 即可；默认安装到 `~/.local/bin`，可通过 `make install PREFIX=/自定义目录` 修改。确保 `~/.local/bin` 位于 PATH 前面；系统可能有 Rust 工具链自带的同名 `rls`，可用 `command -v rls` 检查，预期为 `~/.local/bin/rls`。安装后可以直接运行 `rls msg <分支>`。
 
 运行 `make` 查看可用命令；`make build` 构建 release 版本，`make test` 运行测试，`make check` 检查格式、Clippy 与 OpenSpec（需安装 OpenSpec）。
+
+## 维护本项目的版本
+
+本项目使用 cargo-release **1.1.2** 管理 Cargo.toml / Cargo.lock 的版本号和版本提交。这是 rls 自身的开发流程，目标项目的 Cargo 发布后端仍未实现。
+
+```bash
+# 一次性安装开发工具；本机已有该版本时无需重复执行
+make setup-release
+
+# 先提交当前代码改动，保持工作区干净，再验证
+make check test
+
+# 预览：默认 patch，也支持 minor、major 或显式版本号
+make release
+make release LEVEL=0.2.0
+
+# 实际更新版本并创建本地版本提交，保留 cargo-release 的确认提示
+make release-execute LEVEL=patch
+```
+
+`release.toml` 显式启用版本管理，同时关闭 `tag`、`push`、`publish`。Makefile 使用 `--isolated --config release.toml`，不继承用户全局 cargo-release 设置。`make release` 仅 dry-run；`make build` 仍是编译优化二进制，二者不同。
+
+**tag 由你手动创建**，确认版本提交后再操作（以下版本号按实际修改）：
+
+```bash
+git tag v0.1.1
+# 确认目标远端与分支后再自行推送提交和 tag
+# 已有前一 tag 时可生成消息
+rls msg master # 需先配置 master 的版本线，且有两个 tag
+```
+
+首次尚无基线 tag 时不能使用上例生成区间消息。该项目保留 `publish = false`，不会发布到 crates.io。实际发布要求工作区干净；尚未提交的配置改动可能使 cargo-release 检查失败。
+
+参考：[cargo-release 1.1.2 配置](https://github.com/crate-ci/cargo-release/blob/v1.1.2/docs/reference.md)、[rustup 工具链文件](https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file)。
 
 ## 给 Agent CLI 安装 skill
 
@@ -86,91 +94,84 @@ make install-skill AGENT=claude FORCE=1
 
 安装目录依据 [Codex](https://developers.openai.com/codex/skills/)、[Claude Code](https://code.claude.com/docs/en/skills)、[Gemini CLI](https://geminicli.com/docs/cli/skills/) 和 [OpenCode](https://opencode.ai/docs/skills/) 的官方说明。支持情况取决于实际 CLI 版本；安装后重启会话或使用其 skills 重载功能。旧版或不同目录布局使用 `SKILL_DIR` 覆盖。
 
-可以对 Agent 说：“使用 rls skill，为当前仓库配置消息模板，并从指定 tag 区间生成通知。”skill 会检查安装版本，明确 `plan/run/nexttag` 尚未实现，不把本地 tag 的存在当作已推送或发布成功。
+可以对 Agent 说：“使用 rls skill，为当前仓库配置消息模板，并为指定分支生成通知。”skill 会检查安装版本，明确 `plan/run` 尚未实现，不把本地 tag 的存在当作已推送或发布成功。
 
 `make test-skill` 在临时目录验证安装、更新保护、自定义路径和各 Agent 的目录选择；未启动各厂商 CLI 做运行时加载测试。
 
-## 生成消息
+## 配置和消息
 
-直接从目标仓库的 Git tag 与提交读取，不需要 records、JSON 或记录 ID。
-
-```bash
-# 显式指定两个已有 tag，读取 old..new 的全部提交
-rls message v5.6.0.4 --from v5.6.0.3
-
-# 配置分支版本线后自动选择上一 tag
-rls message v5.6.0.4
-
-# 多个 tag 各自选择基线，按参数顺序合并消息
-rls message v5.6.0.4 v5.6.1.6
-
-# 缩写、输出文件与剪贴板
-rls msg v5.6.0.4 -o /tmp/release-message.txt
-rls m v5.6.0.4 -c
-```
-
-`--from` 只适用于一个目标 tag。输入必须是已有 tag（支持轻量和带注释 tag），不接受分支或任意 revision 表达式。命令在仓库及其子目录、worktree 中运行，只读取本地 Git，不自动 fetch、创建或推送 tag。需要远端新增 tag 时先按需获取；本地 tag 存在不等于发布成功。
-
-自动选基线需要仓库配置中的版本线规则，例如：
+仓库配置为 `<git-common-dir>/rls/config.toml`，普通仓库对应 `.git/rls/config.toml`；linked worktree 共用。使用 `git rev-parse --path-format=absolute --git-common-dir` 发现路径。
 
 ```toml
 schema_version = 1
-
+[release]
+remote = "origin"
 [branches."5.6"]
 version_prefix = "5.6.0"
 tag_prefix = "v"
-
+increment = "counter"
+[branches."5.6-2sync"]
+version_prefix = "5.6.1"
+tag_prefix = "v"
+increment = "counter"
 [message]
 version = 1
-template = "templates/release-message.md.j2"
-
+# template = "templates/release-message.md.j2"
 [message.variables]
 greeting = "请协助构建以下补丁包，谢谢。"
 ```
 
-这条规则匹配 `v5.6.0.<整数>`。在目标 tag 的祖先中选取同版本线末位数字最大的较早 tag；排除其他版本线、日期 tag 和不在目标历史中的 tag。首次无基线、版本顺序不单调、存在歧义或浅克隆时，不猜测，需补全历史或用 `--from` 指定可验证的基线。基线必须是目标的祖先；同一提交报“无新变更”。分支规则仅从仓库配置读取，全局配置只提供消息默认值。
+`message.version` 与顶层 `schema_version` 独立，省略按 v1，各层合并前分别校验。全局配置来自 `$RLS_CONFIG_HOME/config.toml`，否则位于系统用户配置目录下的 `rls/config.toml`；macOS 为 `~/Library/Application Support/rls`。消息模板按仓库、全局、内置顺序选择，变量按键覆盖；相对模板路径以声明目录为基准。分支及远端规则仅读取仓库配置。
 
-仓库配置与模板可以这样安装（已有文件请直接编辑）：
+`rls msg 5.6 5.6-2sync` 按参数顺序将各分支的上一 tag 到最新 tag 区间一次渲染为一条消息，不包含最新 tag 之后的提交。不再接受 tag 参数、range 或 `--from`。`-o/--output` 写文件，`-c/--copy` 复制。命令只读本地 Git；优先使用本地分支，没有时使用配置远端的跟踪分支，不自动 fetch。
 
-```bash
-rls_metadata="$(git rev-parse --path-format=absolute --git-common-dir)/rls"
-mkdir -p "$rls_metadata/templates"
-cp -n rls.example.toml "$rls_metadata/config.toml"
-cp -n templates/release-message.md.j2 "$rls_metadata/templates/release-message.md.j2"
-```
+按版本线严格匹配 `tag_prefix + version_prefix + .整数`，只考虑分支可达的 tag，按数字排序取最近两个。至少需要两个 tag；浅克隆、重复数字、历史倒退、分叉或同一提交的空区间报错。任一分支失败时不输出部分消息。模板接收 `releases` 和 `variables`，每项 release 含 branch、version、tag、previous_tag、sha、previous_sha、commits（sha、subject），提交按反向拓扑排序。不使用 records，也不自动发送消息。
 
-全局配置使用同样的文件布局，参见 [全局配置示例](rls.global.example.toml)。`[message]` 使用独立的 `version = 1` 标记消息配置格式，与顶层 `schema_version` 和发布版本无关。旧配置省略时按 v1 读取；每层先校验版本再合并，未知版本报错，不由另一层覆盖掉错误。消息字段优先级为仓库、全局、内置；`message.variables` 按顶层键合并，空字符串覆盖原值。模板可访问 `releases` 和 `variables`，每项提供 `tag`、`previous_tag`、`sha`、`previous_sha`、`version`、`branch` 和 `commits`（每条含 `sha` 与 `subject`），支持 Jinja 风格循环、条件与格式化。变量拼错、模板丢失、无效配置都会失败并显示文件来源。模板不提供文件加载、shell 或环境变量访问。
+完整示例：[仓库配置](rls.example.toml)、[全局配置](rls.global.example.toml)、[模板](templates/release-message.md.j2)。复制模板时保留相对目录；配置变量不会改变 Git 事实。
 
-每次执行重新读取消息设置与 Git 区间；修改文案后直接重跑即可。输出失败可独立重试，不会重做发布。显式区间未匹配版本线时，模板中的 `branch` 为空、`version` 为完整 tag 名；匹配时按规则去掉 tag_prefix。不再提供 `release_id` 或 `status` 模板字段。`--copy` 需要可用的桌面剪贴板。
+## tag 递增和重试
 
-## 开发与验收
-
-本仓库已用 OpenSpec 1.6.0 初始化 Codex 工作流，使用 cucumber-rs 0.23 执行中文 Gherkin。开发需要 Rust/Cargo（本次验证为 Rust 1.95.0）；OpenSpec 需要 Node.js 20.19+。
+`tag` 获取所选远端分支与 tags，以远端提交为目标，不切换分支或改动工作区。默认 counter 模式取可达的同线最大数字加一（9 → 10）。无新提交不创建空版本；名称冲突不覆盖、不跳号、不强推。`increment = "manual"` 要求显式 `--name`，名称仍需符合版本线格式；首次没有基线也使用 `--name`。
 
 ```bash
-# 安装与本仓库初始化时相同的 OpenSpec CLI
-npm install -g @fission-ai/openspec@1.6.0
-
-# 校验规范和变更
-openspec validate --all --strict --no-interactive
-
-# 执行验收场景，依赖版本由 Cargo.lock 固定
-cargo test --locked --test acceptance
-
-# 仅执行配置示例场景
-cargo test --locked --test acceptance -- --tags @configuration-example
-
-cargo fmt --check
+rls t 5.6 -n                      # 只预览发布动作；fetch 会更新本地引用
+rls t 5.6 --name v5.6.0.1         # 首次发布或手工指定版本
+rls t 5.6 --name v5.6.0.10 -p     # 按原名称补推，存在且同 SHA 可复用
+rls t 5.6 -r upstream -p          # 覆盖配置远端
 ```
 
-在 Codex 中使用 `$openspec-propose` 提出变更，再用 `$openspec-apply-change` 实施、`$openspec-archive-change` 归档；新生成的技能可能需要重启会话才能发现。规范放在 `openspec/specs/`，进行中的变更放在 `openspec/changes/`，产品上下文与产物规则在 `openspec/config.yaml`。
+默认仅创建轻量 tag，只有 `--push/-p` 才推送，配置中的旧 `push` 字段不启用推送。只推送本次所选 tag，不推送分支或其他 tags。`--name` 限单分支。多分支逐项执行，部分失败返回非零；保留已创建/已推送结果，不自动回滚。推送失败后以输出的 tag 名和 `--name` 重试；重试仍验证该 tag 指向当前远端分支提交，分支变化时报错。
 
-新增行为先写 OpenSpec 需求和场景，再添加 `tests/features/*.feature` 及 `tests/acceptance.rs` 中的步骤。步骤失败或未定义都会使测试失败。发布测试应使用临时仓库和本地 bare remote。
+## 补全与语言
 
-验收覆盖配置示例、真实仓库与 linked worktree 的消息配置、Git tag 基线选择、模板错误和 CLI 输出。发布流程及计划指纹尚未实现。
+项目手写维护 `completions/` 中的 Bash、Zsh、Fish 脚本，包含别名、选项、仓库配置分支、远端名、已有 tag 和输出路径补全。补全只读，不 fetch 或发布。
 
-参考：[OpenSpec 项目初始化](https://openspec.dev/docs/setup)、[Cucumber Rust 入门](https://cucumber-rs.github.io/cucumber/main/quickstart.html)。
+```bash
+make install-completions
+# Bash：写入 ~/.bashrc（自定义 PREFIX 时修改路径）
+source "$HOME/.local/share/bash-completion/completions/rls"
+# Zsh：写入 ~/.zshrc，fpath 必须在 compinit 前设置
+fpath=("$HOME/.local/share/zsh/site-functions" $fpath)
+autoload -Uz compinit && compinit
+# Fish：可将脚本复制到用户自动加载目录
+mkdir -p ~/.config/fish/completions
+cp completions/rls.fish ~/.config/fish/completions/rls.fish
+```
+
+语言优先级：`--lang` → `RLS_LANG` → `LC_ALL` → `LC_MESSAGES` → `LANG`。系统中文环境使用中文，其余默认英文；显式支持 `en`、`zh-CN`（别名 `zh`）。界面语言影响帮助、执行状态及项目错误提示，不翻译模板正文、提交、Git 原始诊断或依赖库错误。
+
+```bash
+rls --lang en tag --help
+rls msg 5.6 --lang zh-CN
+export RLS_LANG=zh-CN
+```
+
+## 开发与规范
+
+`make test` 执行英文 Cucumber、CLI 语言测试及 Python 安装/补全测试；`make check` 执行 fmt、Clippy 和 OpenSpec 严格校验。Git 验收使用临时真实仓库和 bare remote。OpenSpec CLI 使用 `@fission-ai/openspec@1.6.0`。
+
+参见 [产品纲要](openspec/project.md) 与 [规范](openspec/specs/)。新增命令同时考虑别名、补全、i18n、skill 和真实 Git 行为验收。
 
 ## 许可证
 
-本项目采用 GNU AGPL v3（`AGPL-3.0-only`），英文原文见 [LICENSE](LICENSE)，来源为 [GNU 官方原文](https://www.gnu.org/licenses/agpl-3.0.txt)。
+GNU AGPL v3（`AGPL-3.0-only`），英文原文见 [LICENSE](LICENSE)。

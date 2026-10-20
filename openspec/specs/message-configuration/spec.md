@@ -31,29 +31,21 @@
 - **WHEN** message.version 为字符串
 - **THEN** 配置解析失败并指出来源
 
-### Requirement: Git tag message source
+### Requirement: Branch message source
 
-系统 SHALL 从本地 Git tag 与提交生成消息，不读取或生成发布 records。接受一个或多个目标 tag，并支持单目标 --from。只接受指向提交的 tag，包括轻量和 annotated tag；基线 MUST 是目标祖先，且不能指向相同提交。读取基线之后到目标的全部提交并保留 SHA，使用反向拓扑顺序，不修改 Git 或未提交文件。
+系统 SHALL 接受分支列表，默认当前分支；message/msg/m 等价。每个分支按仓库规则选取可达的数字最大的两个 tag，读取其间全部提交并按参数顺序一次渲染。只读取本地 Git，不接受 tag 参数、range 或 --from，不保存 records。
 
-#### Scenario: Explicit interval
-- **WHEN** 用户指定已有基线与目标 tag
-- **THEN** 生成完整提交区间的消息，并保持 Git 引用和工作区内容不变
+#### Scenario: Multiple branches
+- **WHEN** 用户选择两个有至少两个版本 tag 的分支
+- **THEN** 合并各分支最近一次发布消息，不包含最新 tag 后的提交
 
-#### Scenario: Local data only
-- **WHEN** tag 不在本地或输入是分支/revision 表达式
-- **THEN** 命令报错，不执行 fetch 或发布动作
+#### Scenario: Invalid selection
+- **WHEN** 任一分支缺失规则、少于两个 tag、存在数字歧义、非单调历史或浅克隆
+- **THEN** 命令失败且不输出部分消息
 
-### Requirement: Automatic baseline by repository rule
-
-系统 SHALL 按仓库 branches 的 tag_prefix 和 version_prefix 严格匹配数字后缀，只考虑目标祖先中的同版本线 tag，按末位数字选择上一版本。多个目标按各自规则处理，按输入顺序输出。没有基线、历史不单调、数字重复、历史分叉歧义或浅克隆 MUST 停止自动选择并提示显式基线或补全历史。
-
-#### Scenario: Numeric ordering
-- **WHEN** 同版本线含末位 2、9，目标末位为 10
-- **THEN** 在祖先关系满足时选择 9，不混入其他版本线、日期 tag 或非祖先 tag
-
-#### Scenario: Ambiguous history
-- **WHEN** 候选版本顺序与祖先关系不一致
-- **THEN** 不猜测基线，要求 --from
+#### Scenario: Detached checkout
+- **WHEN** detached HEAD 下省略分支
+- **THEN** 要求显式指定分支
 
 ### Requirement: Git message outputs
 

@@ -1,0 +1,29 @@
+#compdef rls
+# Hand-maintained: no fetching or mutation during completion.
+_rls() {
+    local context state state_descr line
+    typeset -A opt_args
+    _arguments -C \
+        '--lang[interface language]:language:(en zh-CN)' \
+        '1:command:(message msg m tag t)' \
+        '*::argument:->args'
+    case "$state" in
+        args)
+            case "$words[1]" in
+                message|msg|m)
+                    _arguments '--lang[interface language]:language:(en zh-CN)' '-o[output file]:file:_files' '--output[output file]:file:_files' \
+                        '-c[copy]' '--copy[copy]' '-h[help]' '--help[help]' \
+                        '*:branch:($(rls completion-branches 2>/dev/null))'
+                    ;;
+                tag|t)
+                    _arguments '--lang[interface language]:language:(en zh-CN)' '-n[dry run]' '--dry-run[dry run]' '-p[push tags]' '--push[push tags]' \
+                        '-r[remote]:remote:($(git remote 2>/dev/null))' \
+                        '--remote[remote]:remote:($(git remote 2>/dev/null))' \
+                        '--name[tag name]:tag:($(git tag --list 2>/dev/null))' \
+                        '-h[help]' '--help[help]' '*:branch:($(rls completion-branches 2>/dev/null))'
+                    ;;
+            esac
+            ;;
+    esac
+}
+_rls "$@"

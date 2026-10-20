@@ -1,4 +1,4 @@
-# 消息与 branches 版本线规则可用；release 发布动作配置仍为草案。部署到 <git-common-dir>/rls/config.toml。
+# 消息与多分支 tag 命令配置。部署到 <git-common-dir>/rls/config.toml。
 # 将 templates/release-message.md.j2 一并复制到该配置目录的 templates/ 下。
 schema_version = 1
 
@@ -8,15 +8,17 @@ name = "example-service"
 [release]
 backend = "git-tag"
 remote = "origin"
-push = true
+ # 推送只由 tag --push/-p 显式启用。
 
 [branches."5.6"]
 version_prefix = "5.6.0"
 tag_prefix = "v"
+increment = "counter" # 或 manual，要求 tag --name
 
 [branches."5.6-2sync"]
 version_prefix = "5.6.1"
 tag_prefix = "v"
+increment = "counter" # 或 manual，要求 tag --name
 
 # 可省略 template 以继承全局模板，再回退到内置模板。
 [message]
