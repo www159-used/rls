@@ -1,0 +1,11 @@
+# 全局消息配置示例：放入用户配置目录 rls/config.toml，
+# 或 $RLS_CONFIG_HOME/config.toml。支持运行时读取。
+schema_version = 1
+
+[message]
+version = 1
+# 将模板复制到此全局配置目录的 templates/ 下；省略时使用内置模板。
+template = "templates/release-message.md.j2"
+
+[message.variables]
+greeting = "请协助构建以下补丁包，谢谢。"
