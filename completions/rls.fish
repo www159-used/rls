@@ -1,3 +1,4 @@
+# Script naming is configuration-driven; --name bypasses scripts and completion never runs them.
 # Hand-maintained rls completion.
 complete -c rls -f
 complete -c rls -n 'not __fish_seen_subcommand_from message msg m tag t' -a 'message msg m tag t'

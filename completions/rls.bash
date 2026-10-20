@@ -1,3 +1,4 @@
+# Script naming is configuration-driven; --name bypasses scripts and completion never runs them.
 # Hand-maintained rls completion; requires the release CLI on PATH.
 _rls_complete() {
     local cur prev cmd candidates candidate

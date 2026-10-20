@@ -73,3 +73,11 @@ git rev-parse --path-format=absolute --git-common-dir
 - 变量未定义、模板缺失或语法错误均失败。模板没有 shell、环境变量访问或任意文件加载功能。
 
 改完后用用户选定的分支实际渲染，检查称呼、版本、完整提交顺序和空行。交付生成文本或输出文件路径；消息生成本身不代表通知已经发出。
+
+## 脚本自定义命名
+
+`increment = "script"` 支持 Unix 命名脚本；manual 仍要求显式 --name。配置和 v1 JSON 协议见 [格式参考](references/formats.md)。先检查实际安装版本，旧版可能只有 counter/manual。
+
+脚本从当前 worktree 执行，仅决定名称或 skip；rls 按固定远端 SHA 校验、创建并可选推送。相对路径以 worktree 根为基准，不是 .git/rls。脚本版本可能与发布提交不同，需要版本文件时读取 target_sha 对应内容。
+
+--dry-run 仍执行脚本，不能保证脚本自身无副作用；先读取用户配置的命名程序，不能为普通消息任务运行它。msg 和 --name 不调用脚本，Windows 仅允许这两条不执行脚本的路径。推送失败使用原 --name 与原 --remote 重试，不能重新命名掩盖失败。全部 skip 是成功，不应宣布创建了 tag；任一分支失败需保留并报告成功项。

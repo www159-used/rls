@@ -1069,8 +1069,10 @@ dependencies = [
  "cucumber",
  "directories",
  "futures",
+ "libc",
  "minijinja",
  "serde",
+ "serde_json",
  "tempfile",
  "toml",
 ]

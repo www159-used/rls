@@ -244,6 +244,50 @@ Feature: Release messages and multi-branch tags
     When running the CLI with "m main"
     Then the error contains "Non-monotonic"
 
+  Scenario: Exclude an explicitly configured legacy tag from messages
+    Given tag "v1.0.1007" points to "HEAD~1"
+    And the repository configuration is
+      """
+      schema_version = 1
+      [branches.main]
+      version_prefix = "1.0"
+      tag_prefix = "v"
+      exclude_tags = ["v1.0.1007"]
+      """
+    When running the CLI with "m main"
+    Then the message contains all commits in order with preserved newlines
+    And the message excludes "v1.0.1007"
+
+  Scenario: Exclude a legacy tag when creating and pushing the next release
+    Given a local bare remote and two release branches exist
+    And tag "v1.0.1007" points to "HEAD~2"
+    And the repository configuration is
+      """
+      schema_version = 1
+      [branches.main]
+      version_prefix = "1.0"
+      tag_prefix = "v"
+      exclude_tags = ["v1.0.1007"]
+      [branches.maintenance]
+      version_prefix = "2.0"
+      tag_prefix = "v"
+      """
+    When running the CLI with "t main maintenance -p"
+    Then both new tags point to remote commits and are pushed without changing the worktree
+
+  Scenario: Explicit names cannot reuse an excluded legacy tag
+    Given a local bare remote and two release branches exist
+    And the repository configuration is
+      """
+      schema_version = 1
+      [branches.main]
+      version_prefix = "1.0"
+      tag_prefix = "v"
+      exclude_tags = ["v1.0.1007"]
+      """
+    When running the CLI with "t main --name v1.0.1007 -n"
+    Then the error contains "--name"
+
   Scenario: Reject shallow history
     Given running from a depth-one shallow clone
     When running the CLI with "m main"

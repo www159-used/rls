@@ -27,7 +27,7 @@ rls --version
 
 ## 维护本项目的版本
 
-本项目使用 cargo-release **1.1.2** 管理 Cargo.toml / Cargo.lock 的版本号和版本提交。这是 rls 自身的开发流程，目标项目的 Cargo 发布后端仍未实现。
+本项目使用 cargo-release **1.1.2** 管理 Cargo.toml / Cargo.lock 的版本号、版本提交、tag 和推送。这是 rls 自身的开发流程，目标项目的 Cargo 发布后端仍未实现。
 
 ```bash
 # 一次性安装开发工具；本机已有该版本时无需重复执行
@@ -40,22 +40,13 @@ make check test
 make release
 make release LEVEL=0.2.0
 
-# 实际更新版本并创建本地版本提交，保留 cargo-release 的确认提示
+# 实际更新版本、创建 tag 并推送 origin，保留 cargo-release 的确认提示
 make release-execute LEVEL=patch
 ```
 
-`release.toml` 显式启用版本管理，同时关闭 `tag`、`push`、`publish`。Makefile 使用 `--isolated --config release.toml`，不继承用户全局 cargo-release 设置。`make release` 仅 dry-run；`make build` 仍是编译优化二进制，二者不同。
+`release.toml` 显式启用版本管理，开启 `tag`、`push`，固定 `push-remote = "origin"`，关闭 crates.io `publish`。Makefile 使用 `--isolated --config release.toml`，不继承用户全局 cargo-release 设置。`make release` 仅 dry-run；`make build` 仍是编译优化二进制，二者不同。
 
-**tag 由你手动创建**，确认版本提交后再操作（以下版本号按实际修改）：
-
-```bash
-git tag v0.1.1
-# 确认目标远端与分支后再自行推送提交和 tag
-# 已有前一 tag 时可生成消息
-rls msg master # 需先配置 master 的版本线，且有两个 tag
-```
-
-首次尚无基线 tag 时不能使用上例生成区间消息。该项目保留 `publish = false`，不会发布到 crates.io。实际发布要求工作区干净；尚未提交的配置改动可能使 cargo-release 检查失败。
+执行成功后，版本提交与对应 tag（例如 `v0.1.1`）会推送到 origin，无需手工打 tag 或另行 push。`publish = false` 仅表示不发布到 crates.io，不影响 Git 推送。执行前需提交工作区改动并确保远端可写。
 
 参考：[cargo-release 1.1.2 配置](https://github.com/crate-ci/cargo-release/blob/v1.1.2/docs/reference.md)、[rustup 工具链文件](https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file)。
 
@@ -129,6 +120,8 @@ greeting = "请协助构建以下补丁包，谢谢。"
 
 完整示例：[仓库配置](rls.example.toml)、[全局配置](rls.global.example.toml)、[模板](templates/release-message.md.j2)。复制模板时保留相对目录；配置变量不会改变 Git 事实。
 
+版本线可以配置 `exclude_tags = ["v5.0.0.1007"]`，按完整名称排除已确认属于旧版本线的特殊 tag。该规则同时作用于递增、消息区间和 `--name` 校验；不会删除或移动 tag，也不会忽略 fetch 冲突。
+
 ## tag 递增和重试
 
 `tag` 获取所选远端分支与 tags，以远端提交为目标，不切换分支或改动工作区。默认 counter 模式取可达的同线最大数字加一（9 → 10）。无新提交不创建空版本；名称冲突不覆盖、不跳号、不强推。`increment = "manual"` 要求显式 `--name`，名称仍需符合版本线格式；首次没有基线也使用 `--name`。
@@ -141,6 +134,40 @@ rls t 5.6 -r upstream -p          # 覆盖配置远端
 ```
 
 默认仅创建轻量 tag，只有 `--push/-p` 才推送，配置中的旧 `push` 字段不启用推送。只推送本次所选 tag，不推送分支或其他 tags。`--name` 限单分支。多分支逐项执行，部分失败返回非零；保留已创建/已推送结果，不自动回滚。推送失败后以输出的 tag 名和 `--name` 重试；重试仍验证该 tag 指向当前远端分支提交，分支变化时报错。
+
+## 自定义脚本命名（Unix）
+
+`increment = "manual"` 仍要求显式 `--name`；需要程序计算名称时使用 `script`：
+
+```toml
+[branches."5.6"]
+increment = "script"
+tag_pattern = "release-5.6-*"
+tag_prefix = "release-"
+[branches."5.6".script]
+command = ["sh", "./scripts/next-tag.sh"]
+timeout_seconds = 10
+```
+
+可从 [命名脚本示例](scripts/next-tag.example.sh) 开始，将它复制到目标项目。示例需要 Python 3，以目标 SHA 的前 12 位命名；不打 tag、不 push。执行目录为当前 worktree 根，带相对路径的程序也以此为基准，裸程序名走 PATH，其他参数原样传入。脚本是当前工作区版本；若需要发布文件中的版本号，使用输入的 target_sha 执行 `git show` 读取，不能假设工作区文件等于远端发布内容。
+
+stdin 输入一份 JSON 后关闭：
+
+```json
+{"version":1,"branch":"5.6","target_sha":"full-commit-id","previous_tag":"release-5.6-old","previous_sha":"full-commit-id","dry_run":false}
+```
+
+首次没有基线时两个 previous 字段均为 null。stdout 只输出一份 JSON：
+
+```json
+{"version":1,"action":"tag","name":"release-5.6-new"}
+```
+
+或 `{"version":1,"action":"skip","reason":"Not scheduled"}`。日志写 stderr；非零退出、未知/重复字段、错误版本、空字段或额外 stdout 均失败。stdout 上限 64 KiB；stderr 保留末尾 64 KiB 并标记截断。默认 10 秒超时，超时/超量输出终止 Unix 进程组；脚本不得脱离进程组。Windows 不执行脚本，需使用 `--name`；`msg` 不受平台限制。
+
+script 必须配置非空 tag_pattern，支持全名匹配的 `*`、`?`；按严格祖先链选择最近 tag，不按名称或日期排序。不能同时声明 version_prefix；tag_prefix 只用于模板 version 去前缀。manual 也可配置 pattern；counter 禁止 pattern。没有 pattern 时保留原数字规则。exclude_tags 优先排除历史和新名称。同提交多个匹配 tag、分叉和浅克隆报错。脚本返回名必须匹配规则且不能冲突。
+
+`rls t 5.6 -n` 仍会执行脚本（dry_run=true），无法隔离脚本自身副作用；无变更时不调用。全部 skip 成功退出。推送失败后用 `rls t 5.6 --name <原名称> -p` 绕过脚本，按原名称恢复。`msg` 不执行脚本，按同一历史规则选择最近两次发布。
 
 ## 补全与语言
 

@@ -48,7 +48,7 @@ MiniJinja 模板提供 `releases` 和 `variables`。每项 release 包含 tag、
 
 `rust-toolchain.toml` 固定 Rust 1.95.0，使用 minimal profile 加 rustfmt、Clippy；Cargo 声明 rust-version = 1.95。
 
-本项目使用 cargo-release 1.1.2 管理版本更新和本地版本提交，release.toml 显式 release = true、publish/tag/push = false。make release 仅预览，make release-execute 实际执行并保留确认提示；tag 由维护者手动创建。此工具配置不代表 rls 的目标项目 Cargo 发布后端已经实现。
+本项目使用 cargo-release 1.1.2 管理版本更新和本地版本提交，release.toml 显式 release/tag/push = true、publish = false，push-remote = origin。make release 仅预览，make release-execute 更新版本、创建 tag 并推送 origin，保留确认提示。此工具配置不代表 rls 的目标项目 Cargo 发布后端已经实现。
 
 ## 后续：发布规划与执行
 
@@ -67,3 +67,7 @@ Cargo 后端在第二阶段验证：可能修改版本文件、产生发布提�
 - [ ] cargo-release 单包及 workspace 集成。
 
 当前验收在临时真实 Git 仓库中运行，覆盖注释 tag、数字排序、多个版本线、祖先关系、无变更、worktree、未提交文件保持、配置继承及模板错误。tag 推送已用本地 bare remote 验收；planner 指纹尚未实现。
+
+## 脚本自定义 tag
+
+已实现 script 模式，使用 version=1 的 JSON stdin/stdout 交互；脚本决定名称或 skip，rls 负责校验、创建和显式推送。--name 绕过脚本恢复。script 必须有 tag_pattern，按祖先链选历史；manual 可选 pattern，counter 保留数字规则。msg 不执行脚本，version 按所选分支 tag_prefix 去前缀。脚本从当前 worktree 根执行，Unix 使用有界输出、超时及独立进程组回收；Windows 在执行前拒绝脚本。详细协议见 README 与 script-tag-increment 规范。

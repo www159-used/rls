@@ -1,4 +1,5 @@
 #compdef rls
+# --name bypasses scripts; branch completion never executes naming scripts.
 # Hand-maintained: no fetching or mutation during completion.
 _rls() {
     local context state state_descr line
@@ -16,10 +17,10 @@ _rls() {
                         '*:branch:($(rls completion-branches 2>/dev/null))'
                     ;;
                 tag|t)
-                    _arguments '--lang[interface language]:language:(en zh-CN)' '-n[dry run]' '--dry-run[dry run]' '-p[push tags]' '--push[push tags]' \
+                    _arguments '--lang[interface language]:language:(en zh-CN)' '-n[dry run (runs naming script)]' '--dry-run[dry run (runs naming script)]' '-p[push tags]' '--push[push tags]' \
                         '-r[remote]:remote:($(git remote 2>/dev/null))' \
                         '--remote[remote]:remote:($(git remote 2>/dev/null))' \
-                        '--name[tag name]:tag:($(git tag --list 2>/dev/null))' \
+                        '--name[tag name (bypass script)]:tag:($(git tag --list 2>/dev/null))' \
                         '-h[help]' '--help[help]' '*:branch:($(rls completion-branches 2>/dev/null))'
                     ;;
             esac

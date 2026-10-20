@@ -4,7 +4,6 @@ use crate::{
 };
 use anyhow::{Context, Result, bail};
 use std::{
-    collections::BTreeMap,
     path::Path,
     process::{Command, Output},
 };
@@ -76,7 +75,10 @@ fn ancestor(cwd: &Path, old: &str, new: &str) -> Result<bool> {
 }
 
 fn number(tag: &str, rule: &BranchRule) -> Option<u64> {
-    let prefix = format!("{}{}.", rule.tag_prefix, rule.version_prefix);
+    if rule.exclude_tags.iter().any(|excluded| excluded == tag) {
+        return None;
+    }
+    let prefix = format!("{}{}.", rule.prefix(), rule.version_prefix.as_deref()?);
     let suffix = tag.strip_prefix(&prefix)?;
     if suffix.is_empty() || !suffix.bytes().all(|b| b.is_ascii_digit()) {
         return None;
@@ -84,32 +86,9 @@ fn number(tag: &str, rule: &BranchRule) -> Option<u64> {
     suffix.parse().ok()
 }
 
-fn release(
-    cwd: &Path,
-    tag: &str,
-    from: &str,
-    branches: &BTreeMap<String, BranchRule>,
-) -> Result<Release> {
+fn release(cwd: &Path, tag: &str, from: &str, branch: &str, rule: &BranchRule) -> Result<Release> {
     let sha = tag_sha(cwd, tag)?;
-    let matching: Vec<_> = branches
-        .iter()
-        .filter_map(|(branch, rule)| number(tag, rule).map(|n| (branch, rule, n)))
-        .collect();
-    if matching.len() > 1 {
-        bail!(
-            "{}",
-            crate::tr!("tag {tag} 匹配多个分支版本线，请修正仓库配置", tag = tag)
-        );
-    }
-    let (branch, version) = matching
-        .first()
-        .map(|(branch, rule, _)| {
-            (
-                (*branch).clone(),
-                tag.strip_prefix(&rule.tag_prefix).unwrap().to_owned(),
-            )
-        })
-        .unwrap_or_else(|| (String::new(), tag.to_owned()));
+    let version = tag.strip_prefix(rule.prefix()).unwrap_or(tag).to_owned();
     let (previous_tag, previous_sha) = (from.to_owned(), tag_sha(cwd, from)?);
     if !ancestor(cwd, &previous_sha, &sha)? {
         bail!(
@@ -162,7 +141,7 @@ fn release(
         sha,
         previous_sha,
         version,
-        branch,
+        branch: branch.into(),
         commits,
     })
 }
@@ -197,11 +176,51 @@ fn history(cwd: &Path, target: &str, rule: &BranchRule) -> Result<Vec<(u64, Stri
     )?
     .lines()
     {
-        if let Some(n) = number(tag, rule) {
-            let sha = tag_sha(cwd, tag)?;
+        if matches_rule(tag, rule) {
+            let n = number(tag, rule).unwrap_or(0);
+            let object = text(
+                cwd,
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--end-of-options",
+                    &format!("refs/tags/{tag}^{{}}"),
+                ],
+            )?;
+            let sha = object.trim().to_owned();
+            if text(cwd, &["cat-file", "-t", &sha])?.trim() != "commit" {
+                continue;
+            }
             if ancestor(cwd, &sha, target)? {
                 entries.push((n, tag.to_owned(), sha));
             }
+        }
+    }
+    if rule.tag_pattern.is_some() {
+        // Rank each node by its number of strict ancestors. Every pair must be comparable.
+        let mut ranks = vec![0; entries.len()];
+        for i in 0..entries.len() {
+            for j in i + 1..entries.len() {
+                if entries[i].2 == entries[j].2 {
+                    bail!(
+                        "{}",
+                        crate::tr!("版本基线有歧义: {} / {}", entries[i].1, entries[j].1)
+                    );
+                }
+                if ancestor(cwd, &entries[i].2, &entries[j].2)? {
+                    ranks[j] += 1;
+                } else if ancestor(cwd, &entries[j].2, &entries[i].2)? {
+                    ranks[i] += 1;
+                } else {
+                    bail!(
+                        "{}",
+                        crate::tr!("版本历史不单调或分叉: {} / {}", entries[i].1, entries[j].1)
+                    );
+                }
+            }
+        }
+        for (entry, rank) in entries.iter_mut().zip(ranks) {
+            entry.0 = rank;
         }
     }
     entries.sort_by_key(|item| item.0);
@@ -259,9 +278,7 @@ pub fn branch_release(
     }
     let latest = &entries[entries.len() - 1];
     let previous = &entries[entries.len() - 2];
-    let mut result = release(cwd, &latest.1, &previous.1, &settings.branches)?;
-    result.branch = branch.into();
-    Ok(result)
+    release(cwd, &latest.1, &previous.1, branch, rule)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -278,6 +295,9 @@ pub fn create_tag(
         .branches
         .get(branch)
         .with_context(|| crate::tr!("请配置 branches.{branch}", branch = branch))?;
+    if name.is_none() && rule.increment == crate::config::Increment::Script {
+        crate::script::ensure_supported()?;
+    }
     let remote = remote.unwrap_or(&settings.release.remote);
     // Only configured remote names: never interpret a URL or option from configuration.
     if !text(cwd, &["remote"])?.lines().any(|r| r == remote) || remote.starts_with('-') {
@@ -294,30 +314,68 @@ pub fn create_tag(
     )?;
     let entries = history(cwd, &target, rule)?;
     let tag = if let Some(name) = name {
-        if number(name, rule).is_none() {
-            bail!("{}", crate::tr!("--name 必须匹配分支版本线"));
-        }
         name.to_owned()
     } else {
         if rule.increment == crate::config::Increment::Manual {
             bail!("{}", crate::tr!("manual 模式需要 --name"));
         }
-        let latest = entries
-            .last()
-            .context(crate::tr!("没有基线 tag，首次发布请使用 --name"))?;
-        if latest.2 == target {
+        if let Some(latest) = entries.last().filter(|latest| latest.2 == target) {
             return Ok(crate::tr!(
                 "无新变更 ({})；如需补推请使用 --name {} --push",
                 latest.1,
                 latest.1
             ));
         }
-        let n = latest
-            .0
-            .checked_add(1)
-            .context(crate::tr!("tag 计数溢出"))?;
-        format!("{}{}.{}", rule.tag_prefix, rule.version_prefix, n)
+        if rule.increment == crate::config::Increment::Script {
+            let root = text(cwd, &["rev-parse", "--show-toplevel"])?;
+            let request = crate::script::Request {
+                version: 1,
+                branch,
+                target_sha: &target,
+                previous_tag: entries.last().map(|e| e.1.as_str()),
+                previous_sha: entries.last().map(|e| e.2.as_str()),
+                dry_run,
+            };
+            match crate::script::run(
+                Path::new(root.trim_end_matches(['\r', '\n'])),
+                rule.script.as_ref().expect("validated script"),
+                &request,
+            )? {
+                crate::script::Decision::Tag(name) => name,
+                crate::script::Decision::Skip(reason) => {
+                    return Ok(format!(
+                        "{}: {reason}",
+                        crate::i18n::text("跳过", "Skipped")
+                    ));
+                }
+            }
+        } else {
+            let latest = entries
+                .last()
+                .context(crate::tr!("没有基线 tag，首次发布请使用 --name"))?;
+            let n = latest
+                .0
+                .checked_add(1)
+                .context(crate::tr!("tag 计数溢出"))?;
+            format!(
+                "{}{}.{}",
+                rule.prefix(),
+                rule.version_prefix
+                    .as_deref()
+                    .expect("validated numeric rule"),
+                n
+            )
+        }
     };
+    if !matches_rule(&tag, rule) {
+        bail!(
+            "{}",
+            crate::i18n::text(
+                "tag 必须匹配分支规则且不能被排除",
+                "tag must match the branch rule and must not be excluded"
+            )
+        );
+    }
     let reference = format!("refs/tags/{tag}");
     text(cwd, &["check-ref-format", &reference])?;
     let exists = command(cwd, &["show-ref", "--verify", "--quiet", &reference])?
@@ -331,7 +389,7 @@ pub fn create_tag(
             );
         }
     } else if let Some(latest) = entries.last() {
-        if number(&tag, rule).unwrap() <= latest.0 {
+        if rule.tag_pattern.is_none() && number(&tag, rule).unwrap() <= latest.0 {
             bail!("{}", crate::tr!("新 tag 必须大于上一版本 {}", latest.1));
         }
         if latest.2 == target {
@@ -356,10 +414,15 @@ pub fn create_tag(
     }
     if push {
         text(cwd, &["push", remote, &format!("{reference}:{reference}")]).with_context(|| {
-            crate::tr!(
-                "本地 {tag} 已保留；使用 tag {branch} --name {tag} --push 重试",
-                tag = tag,
-                branch = branch
+            format!(
+                "{}: rls tag {} --name {} --remote {} --push",
+                crate::i18n::text(
+                    "本地 tag 已保留，按原名称重试",
+                    "Local tag retained; retry the original name"
+                ),
+                shell_argument(branch),
+                shell_argument(&tag),
+                shell_argument(remote)
             )
         })?;
     }
@@ -373,4 +436,46 @@ pub fn create_tag(
             crate::tr!("已创建")
         }
     ))
+}
+
+fn matches_rule(tag: &str, rule: &BranchRule) -> bool {
+    !rule.exclude_tags.iter().any(|excluded| excluded == tag)
+        && match &rule.tag_pattern {
+            Some(pattern) => glob_matches(pattern, tag),
+            None => number(tag, rule).is_some(),
+        }
+}
+
+// Whole-name glob with only '*' and '?'; '?' matches one Unicode scalar, including '/'.
+fn glob_matches(pattern: &str, name: &str) -> bool {
+    let name: Vec<_> = name.chars().collect();
+    let mut previous = vec![false; name.len() + 1];
+    previous[0] = true;
+    for token in pattern.chars() {
+        let mut next = vec![false; name.len() + 1];
+        if token == '*' {
+            next[0] = previous[0];
+        }
+        for i in 1..=name.len() {
+            next[i] = if token == '*' {
+                previous[i] || next[i - 1]
+            } else {
+                previous[i - 1] && (token == '?' || token == name[i - 1])
+            };
+        }
+        previous = next;
+    }
+    previous[name.len()]
+}
+
+fn shell_argument(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._/-".contains(&b))
+    {
+        value.to_owned()
+    } else {
+        format!("'{}'", value.replace('\'', "'\"'\"'"))
+    }
 }

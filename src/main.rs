@@ -34,7 +34,7 @@ enum Commands {
         #[arg(help = l("分支列表，默认当前分支", "Branches; defaults to the current branch"))]
         branches: Vec<String>,
         #[arg(short = 'n', long)]
-        #[arg(help = l("预览；会 fetch，不创建或推送 tag", "Preview; fetches refs without creating or pushing tags"))]
+        #[arg(help = l("预览；会 fetch 并调用命名脚本，不创建或推送 tag", "Preview; fetches refs and runs naming scripts without creating or pushing tags"))]
         dry_run: bool,
         #[arg(short = 'p', long)]
         #[arg(help = l("推送所选 tag", "Push selected tags"))]
@@ -44,7 +44,7 @@ enum Commands {
         remote: Option<String>,
         /// 显式名称，仅支持单分支；也用于失败后重试同一 tag
         #[arg(long)]
-        #[arg(help = l("显式名称，仅单分支；用于首次发布或重试", "Explicit name for one branch; first release or retry"))]
+        #[arg(help = l("显式名称，仅单分支；绕过脚本用于首次发布或重试", "Explicit name for one branch; bypass scripts for first release or retry"))]
         name: Option<String>,
     },
     /// 输出补全用的已配置分支（只读）

@@ -1,8 +1,8 @@
 {{ variables.greeting }}
-{% for release in releases %}
-{{ release.tag }}
+
+{% for release in releases %}{{ release.tag }}
 changelog:
-{% for commit in release.commits %}
-{{ commit.subject }}
-{% endfor %}
-{% endfor %}
+{% for commit in release.commits %}{{ commit.subject }}
+{% endfor %}{% if not loop.last %}
+
+{% endif %}{% endfor %}

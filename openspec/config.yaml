@@ -2,7 +2,7 @@ schema: spec-driven
 
 context: |
   rls 是多分支、多技术栈发布 CLI，使用 Rust，已实现分层消息配置、模板渲染与 message CLI。
-  本项目工具链固定 Rust 1.95.0；cargo-release 1.1.2 只管理版本与版本提交，tag/push/publish 均关闭。
+  本项目工具链固定 Rust 1.95.0；cargo-release 1.1.2 管理版本、版本提交、tag 和 origin 推送，crates.io publish 关闭。
   产品需求、架构边界与实施顺序见 openspec/project.md。
   已实现 tag/t 多分支递增与可选推送，message/msg/m 按分支最近两个 tag 渲染消息。
   仓库配置读取 <git-common-dir>/rls/config.toml，全局目录支持 RLS_CONFIG_HOME 覆盖。
@@ -10,6 +10,7 @@ context: |
   消息字段按仓库、全局、内置默认值解析；变量按键合并，模板相对路径保留声明来源。
   不切换用户分支，不自动覆盖或强推 tag，不自动发送聊天消息。
   plan/run 和 Cargo 后端尚未实现；message 只接受分支列表，不接受 tag/range/--from，无 records。
+  script 模式通过版本化 JSON 让 Unix 脚本起名；tag_pattern 决定祖先链，msg 不执行脚本。
   tests/features/*.feature 使用英文 Gherkin；步骤在 tests/acceptance.rs 与 tests/support/。
   配置示例 smoke 不等同于发布功能验收。发布集成测试使用临时仓库与本地 bare remote。
   文档以中文为主，标识符使用英文。保留 OpenSpec 要求的 Requirement、Scenario、SHALL 等语法。

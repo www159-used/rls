@@ -24,7 +24,7 @@ help:
 	  'make build                  构建 release 版本' \
 	  'make setup-release          安装 cargo-release 1.1.2' \
 	  'make release LEVEL=patch    预览版本变更，不打 tag、不推送' \
-	  'make release-execute LEVEL=patch  更新版本并创建版本提交，保留确认提示' \
+	  'make release-execute LEVEL=patch  更新版本、创建 tag 并推送 origin，保留确认提示' \
 	  'make test                   运行测试' \
 	  'make check                  检查格式、Clippy 和 OpenSpec'
 

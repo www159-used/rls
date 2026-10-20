@@ -452,3 +452,151 @@ fn failed_push_retry(world: &mut ReleaseWorld) {
     assert!(f.output.as_ref().unwrap().status.success());
     assert!(!git_text(&f.repo, &["ls-remote", "--tags", "origin", "v1.0.2"]).is_empty());
 }
+
+#[given("script-based release branches")]
+fn script_branches(world: &mut ReleaseWorld) {
+    remote_fixture(world);
+    let f = fixture(world);
+    git(&f.repo, &["tag", "release-main-z", "HEAD~3"]);
+    git(&f.repo, &["tag", "release-main-a", "HEAD~2"]);
+    git(&f.repo, &["tag", "release-maintenance-z", "HEAD~3"]);
+    git(&f.repo, &["tag", "release-maintenance-a", "HEAD~2"]);
+    let source = ["main", "maintenance"].map(|branch| format!(
+        "[branches.{branch}]\nincrement='script'\ntag_pattern='release-{branch}-*'\ntag_prefix='release-'\n[branches.{branch}.script]\ncommand=['python3','./naming.py']\ntimeout_seconds=1\n"
+    )).join("");
+    std::fs::write(
+        f.repo.join(".git/rls/config.toml"),
+        format!("schema_version=1\n{source}"),
+    )
+    .unwrap();
+}
+
+#[given("the naming script is")]
+fn naming_script(world: &mut ReleaseWorld, step: &Step) {
+    std::fs::write(
+        fixture(world).repo.join("naming.py"),
+        step.docstring.as_ref().unwrap(),
+    )
+    .unwrap();
+}
+
+#[then("custom tags are pushed at the remote commits")]
+fn custom_tags_pushed(world: &mut ReleaseWorld) {
+    let f = fixture(world);
+    assert!(
+        f.output.as_ref().unwrap().status.success(),
+        "{:?}",
+        f.output
+    );
+    for branch in ["main", "maintenance"] {
+        let tag = format!("release-{branch}-next");
+        let target = git_text(&f.repo, &["rev-parse", "HEAD~1"]);
+        assert_eq!(git_text(&f.repo, &["rev-parse", &tag]), target);
+        assert!(
+            git_text(&f.repo, &["ls-remote", "--tags", "origin", &tag]).starts_with(target.trim())
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(f.repo.join("user.txt")).unwrap(),
+        "user edits"
+    );
+}
+
+#[then("no custom release tag exists")]
+fn no_custom_tag(world: &mut ReleaseWorld) {
+    let f = fixture(world);
+    assert!(!git_text(&f.repo, &["tag", "--list"]).contains("-next"));
+    assert!(!git_text(&f.repo, &["ls-remote", "--tags", "origin"]).contains("-next"));
+}
+
+#[then("the same custom tag can be pushed without running the script")]
+fn custom_retry(world: &mut ReleaseWorld) {
+    let f = fixture(world);
+    assert!(!f.output.as_ref().unwrap().status.success());
+    assert!(
+        String::from_utf8_lossy(&f.output.as_ref().unwrap().stderr)
+            .contains("--name release-main-next")
+    );
+    std::fs::remove_file(f._temp.path().join("remote.git/hooks/pre-receive")).unwrap();
+    std::fs::write(
+        f.repo.join("naming.py"),
+        "raise Exception('must not execute')",
+    )
+    .unwrap();
+    custom_command(world, "t main --name release-main-next -p".into());
+    let f = fixture(world);
+    assert!(
+        f.output.as_ref().unwrap().status.success(),
+        "{:?}",
+        f.output
+    );
+    assert!(
+        !git_text(
+            &f.repo,
+            &["ls-remote", "--tags", "origin", "release-main-next"]
+        )
+        .is_empty()
+    );
+}
+
+#[given("no custom baseline tags exist")]
+fn remove_custom_tags(world: &mut ReleaseWorld) {
+    let f = fixture(world);
+    for tag in ["release-main-z", "release-main-a"] {
+        git(&f.repo, &["tag", "-d", tag]);
+    }
+}
+
+#[given("custom tag history forks before the target")]
+fn forked_custom_history(world: &mut ReleaseWorld) {
+    let f = fixture(world);
+    let tree = git_text(&f.repo, &["rev-parse", "HEAD^{tree}"]);
+    let base = git_text(&f.repo, &["rev-parse", "HEAD~3"]);
+    let first = git_text(&f.repo, &["rev-parse", "HEAD~2"]);
+    let commit_tree = |parents: &[&str], message: &str| {
+        let mut command = Command::new("git");
+        command.current_dir(&f.repo).args([
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit-tree",
+            tree.trim(),
+        ]);
+        for parent in parents {
+            command.args(["-p", parent]);
+        }
+        let out = command.args(["-m", message]).output().unwrap();
+        assert!(out.status.success());
+        String::from_utf8(out.stdout).unwrap().trim().to_owned()
+    };
+    let sibling = commit_tree(&[base.trim()], "sibling");
+    let merge = commit_tree(&[first.trim(), &sibling], "merge");
+    git(&f.repo, &["tag", "release-main-sibling", &sibling]);
+    git(&f.repo, &["update-ref", "refs/heads/main", &merge]);
+}
+
+#[given("the message shows the selected branch version")]
+fn branch_version_template(world: &mut ReleaseWorld) {
+    let f = fixture(world);
+    let path = f.repo.join(".git/rls/config.toml");
+    let mut source = std::fs::read_to_string(&path).unwrap();
+    source.push_str("\n[message]\ntemplate='version.j2'\n");
+    std::fs::write(path, source).unwrap();
+    std::fs::write(
+        f.repo.join(".git/rls/version.j2"),
+        "{{ releases[0].branch }}|{{ releases[0].version }}|{{ releases[0].previous_tag }}",
+    )
+    .unwrap();
+}
+
+#[given("the next custom name is excluded")]
+fn excluded_custom_name(world: &mut ReleaseWorld) {
+    let f = fixture(world);
+    let path = f.repo.join(".git/rls/config.toml");
+    let source = std::fs::read_to_string(&path).unwrap().replace(
+        "[branches.main]",
+        "[branches.main]\nexclude_tags=['release-main-next']",
+    );
+    std::fs::write(path, source).unwrap();
+}
